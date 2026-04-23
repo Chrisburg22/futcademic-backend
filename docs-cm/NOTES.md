@@ -14,4 +14,15 @@ Demostrar las 5 acciones básicas de Configuration Management:
 
 ## Versión
 
-v1.0.0
+v1.1.0
+
+## Changelog
+
+- v1.0.0 — Creación inicial del archivo con las 5 acciones de CM.
+- v1.1.0 — Añadido este changelog y mención de la política de branching (`main` = producción).
+
+## Política de branching
+
+- `main` → rama estable, cada commit puede ser desplegado.
+- `feat/*` → nuevas funcionalidades, se mergean a `main` via PR.
+- Tags `vX.Y.Z` marcan releases desplegables.
