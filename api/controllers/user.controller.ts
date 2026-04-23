@@ -77,7 +77,8 @@ export const updateUser = async (req: Request, res: Response) => {
     gender, 
     emergency_contact_name, 
     emergency_contact_phone, 
-    medical_notes 
+    medical_notes,
+    avatar_url
   } = req.body;
 
   try {
@@ -85,7 +86,7 @@ export const updateUser = async (req: Request, res: Response) => {
     if (full_name) {
       const { error: userError } = await supabaseAdmin
         .from('users')
-        .update({ full_name })
+        .update({ full_name, avatar_url })
         .eq('id', id)
         .eq('school_id', school_id);
       
@@ -102,6 +103,7 @@ export const updateUser = async (req: Request, res: Response) => {
       emergency_contact_name,
       emergency_contact_phone,
       medical_notes,
+      avatar_url,
       updated_at: new Date()
     };
 

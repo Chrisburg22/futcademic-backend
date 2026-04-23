@@ -4,7 +4,7 @@ import { supabaseAdmin } from '../config/supabase';
 export const updateSchool = async (req: Request, res: Response) => {
   const { school_id } = req.tenant!;
   const { id } = req.params;
-  const { name } = req.body;
+  const { name, logo_url } = req.body;
 
   // Solo podemos actualizar la escuela del tenant actual
   if (id !== school_id) {
@@ -12,13 +12,17 @@ export const updateSchool = async (req: Request, res: Response) => {
   }
 
   try {
-    if (!name) {
-      return res.status(400).json({ error: 'El nombre de la academia es requerido.' });
+    if (!name && !logo_url) {
+      return res.status(400).json({ error: 'El nombre o el logo de la academia es requerido.' });
     }
+
+    const updateData: any = {};
+    if (name) updateData.name = name;
+    if (logo_url) updateData.logo_url = logo_url;
 
     const { error } = await supabaseAdmin
       .from('schools')
-      .update({ name })
+      .update(updateData)
       .eq('id', id);
 
     if (error) {
