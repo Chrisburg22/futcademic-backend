@@ -66,6 +66,33 @@ export const getTeacherDetails = async (req: Request, res: Response) => {
   }
 };
 
+export const changeOwnPassword = async (req: Request, res: Response) => {
+  const { user_id, school_id } = req.tenant!;
+  const { newPassword } = req.body;
+
+  if (!newPassword || newPassword.length < 8) {
+    return res.status(400).json({ error: 'La contraseña debe tener al menos 8 caracteres.' });
+  }
+
+  try {
+    const { error: authError } = await supabaseAdmin.auth.admin.updateUserById(user_id, {
+      password: newPassword,
+    });
+
+    if (authError) return res.status(400).json({ error: 'Error al actualizar contraseña.' });
+
+    await supabaseAdmin
+      .from('users')
+      .update({ must_change_password: false })
+      .eq('id', user_id)
+      .eq('school_id', school_id);
+
+    res.status(200).json({ message: 'Contraseña actualizada con éxito.' });
+  } catch (err) {
+    res.status(500).json({ error: 'Error interno.' });
+  }
+};
+
 export const updateUser = async (req: Request, res: Response) => {
   const { school_id } = req.tenant!;
   const { id } = req.params;

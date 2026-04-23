@@ -86,10 +86,10 @@ export const createStudent = async (req: Request, res: Response) => {
   }
 
   try {
-    // 1. Crear usuario en Auth
+    // 1. Crear usuario en Auth con contraseña default — alumno debe cambiarla en primer login
     const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
       email,
-      password: 'password123', // Temporal
+      password: 'Futcamedic2024!',
       email_confirm: true,
     });
 
@@ -102,7 +102,7 @@ export const createStudent = async (req: Request, res: Response) => {
     // 2. Crear perfil base en public.users
     const { error: userError } = await supabaseAdmin
       .from('users')
-      .insert([{ id: userId, school_id, role: 'alumno', full_name }]);
+      .insert([{ id: userId, school_id, role: 'alumno', full_name, must_change_password: true }]);
 
     if (userError) return res.status(500).json({ error: 'Error al crear perfil de usuario.' });
 

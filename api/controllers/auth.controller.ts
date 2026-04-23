@@ -60,6 +60,8 @@ export const registerSchool = async (req: Request, res: Response) => {
   }
 };
 
+const DEFAULT_PASSWORD = 'Futcamedic2024!';
+
 export const inviteUser = async (req: Request, res: Response) => {
   const { email, fullName, role } = req.body;
   const { school_id } = req.tenant!;
@@ -69,61 +71,64 @@ export const inviteUser = async (req: Request, res: Response) => {
   }
 
   try {
-    let userId: string;
+    // 1. Crear usuario con contraseña default — debe cambiarla en primer login
+    const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
+      email,
+      password: DEFAULT_PASSWORD,
+      email_confirm: true,
+      user_metadata: { full_name: fullName },
+    });
 
-    // 1. Intentar invitar por email
-    const { data: inviteData, error: inviteError } = await supabaseAdmin.auth.admin.inviteUserByEmail(email);
+    if (authError) {
+      // Si ya existe en Auth, recuperar su ID
+      if (authError.message.toLowerCase().includes('already registered') ||
+          authError.message.toLowerCase().includes('already exists')) {
+        const { data: { users } } = await supabaseAdmin.auth.admin.listUsers();
+        const existing = users.find(u => u.email === email);
+        if (!existing) return res.status(400).json({ error: 'Usuario ya registrado pero no recuperable.' });
 
-    if (inviteError) {
-      // Si hay error de límite de tasa, intentamos crear directamente
-      if (inviteError.message.includes('rate limit exceeded')) {
-        console.warn('Límite de invitaciones alcanzado. Intentando creación directa para:', email);
-        const { data: createData, error: createError } = await supabaseAdmin.auth.admin.createUser({
-          email,
-          email_confirm: true,
-          user_metadata: { full_name: fullName }
-        });
+        const { data: existingProfile } = await supabaseAdmin
+          .from('users').select('id, school_id').eq('id', existing.id).single();
 
-        if (createError) {
-          return res.status(400).json({ error: `Error tras límite de tasa: ${createError.message}` });
+        if (existingProfile) {
+          return res.status(400).json({
+            error: existingProfile.school_id === school_id
+              ? 'Este usuario ya está registrado en tu escuela.'
+              : 'Este usuario ya pertenece a otra escuela.'
+          });
         }
-        userId = createData.user.id;
-      } else {
-        return res.status(400).json({ error: inviteError.message });
+
+        const { error: profileError } = await supabaseAdmin
+          .from('users')
+          .insert([{ id: existing.id, school_id, role, full_name: fullName, must_change_password: true }]);
+
+        if (profileError) return res.status(500).json({ error: 'Error al crear perfil.' });
+
+        await supabaseAdmin.from('profile_information').upsert([{ id: existing.id, school_id }]);
+        return res.status(200).json({ message: `Usuario registrado como ${role}.`, userId: existing.id });
       }
-    } else {
-      userId = inviteData.user!.id;
+
+      return res.status(400).json({ error: authError.message });
     }
 
-    // 2. Insertar en tabla pública
+    const userId = authData.user!.id;
+
+    // 2. Crear perfil público con must_change_password = true
     const { error: profileError } = await supabaseAdmin
       .from('users')
-      .insert([
-        {
-          id: userId,
-          school_id,
-          role,
-          full_name: fullName,
-        },
-      ]);
+      .insert([{ id: userId, school_id, role, full_name: fullName, must_change_password: true }]);
 
     if (profileError) {
-      return res.status(500).json({ error: 'Error al crear el perfil del invitado.' });
+      console.error('Error insertando perfil público:', profileError);
+      return res.status(500).json({ error: 'Error al crear el perfil en la base de datos.' });
     }
 
-    // 3. Crear información de perfil vacía
-    const { error: infoError } = await supabaseAdmin
-      .from('profile_information')
-      .insert([{ id: userId, school_id }]);
+    // 3. Perfil de información vacío
+    await supabaseAdmin.from('profile_information').upsert([{ id: userId, school_id }]);
 
-    if (infoError) {
-      console.error('Error al crear profile_information para invitado:', infoError);
-    }
-
-    const message = userId ? `Usuario creado/invitado con éxito como ${role}.` : `Invitación enviada al correo del ${role}.`;
-    res.status(200).json({ message });
-  } catch (err) {
-    console.error('Invite Error:', err);
+    res.status(200).json({ message: `Usuario creado como ${role}. Contraseña default asignada.`, userId });
+  } catch (err: any) {
+    console.error('Invite Error Catch:', err);
     res.status(500).json({ error: 'Error interno del servidor.' });
   }
 };
