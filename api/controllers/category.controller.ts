@@ -106,6 +106,24 @@ export const updateCategory = async (req: Request, res: Response) => {
   }
 };
 
+export const getMyCategoriesAsTeacher = async (req: Request, res: Response) => {
+  const { school_id, user_id } = req.tenant!;
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('category_teachers')
+      .select('category:categories(id, name, birth_year)')
+      .eq('teacher_id', user_id)
+      .eq('school_id', school_id);
+
+    if (error) return res.status(500).json({ error: 'Error al obtener tus categorías.' });
+
+    const categories = data.map((row: any) => row.category).filter(Boolean);
+    res.status(200).json(categories);
+  } catch (err) {
+    res.status(500).json({ error: 'Error interno.' });
+  }
+};
+
 export const assignTeacher = async (req: Request, res: Response) => {
   const { school_id } = req.tenant!;
   const { id: category_id } = req.params;

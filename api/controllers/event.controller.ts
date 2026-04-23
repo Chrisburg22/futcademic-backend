@@ -66,7 +66,18 @@ export const getTrainingsForDay = async (req: Request, res: Response) => {
       .eq('is_cancelled', false)
       .order('start_time', { ascending: true });
 
-    if (category_id) query = query.eq('category_id', category_id);
+    if (category_id) {
+      query = query.eq('category_id', category_id);
+    } else if (req.tenant!.role === 'profesor') {
+      const { data: teacherCats } = await supabaseAdmin
+        .from('category_teachers')
+        .select('category_id')
+        .eq('teacher_id', req.tenant!.user_id)
+        .eq('school_id', school_id);
+      const categoryIds = (teacherCats || []).map((r: any) => r.category_id);
+      if (categoryIds.length === 0) return res.status(200).json([]);
+      query = query.in('category_id', categoryIds);
+    }
 
     const { data, error } = await query;
     if (error) return res.status(500).json({ error: 'Error al obtener entrenamientos.' });

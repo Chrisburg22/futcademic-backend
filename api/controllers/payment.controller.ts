@@ -3,7 +3,7 @@ import { supabaseAdmin } from '../config/supabase';
 
 export const getPayments = async (req: Request, res: Response) => {
   const { school_id } = req.tenant!;
-  const { type } = req.query;
+  const { type, month } = req.query;
   
   try {
     let query = supabaseAdmin
@@ -14,6 +14,10 @@ export const getPayments = async (req: Request, res: Response) => {
 
     if (type) {
       query = query.eq('payment_type', type as string);
+    }
+
+    if (month) {
+      query = query.eq('payment_month', parseInt(month as string));
     }
 
     const { data, error } = await query;
@@ -46,7 +50,7 @@ export const getPaymentsByStudent = async (req: Request, res: Response) => {
 
 export const registerStudentPayment = async (req: Request, res: Response) => {
   const { school_id } = req.tenant!;
-  const { amount, payment_date, student_id, description } = req.body;
+  const { amount, payment_date, student_id, description, payment_month } = req.body;
 
   if (!amount || !payment_date || !student_id) {
     return res.status(400).json({ error: 'Faltan datos financieros requeridos.' });
@@ -56,7 +60,7 @@ export const registerStudentPayment = async (req: Request, res: Response) => {
     const { data, error } = await supabaseAdmin
       .from('payments')
       .insert([{
-        school_id, amount, payment_date, payment_type: 'mensualidad', student_id, description
+        school_id, amount, payment_date, payment_type: 'mensualidad', student_id, description, payment_month
       }])
       .select().single();
 
