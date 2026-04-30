@@ -87,11 +87,20 @@ export const registerStudentPayment = async (req: Request, res: Response) => {
     return res.status(400).json({ error: 'Faltan datos financieros requeridos.' });
   }
 
+  // Si no se especifica el mes (ej. concepto no es mensualidad), usamos el mes de la fecha de pago
+  const finalMonth = payment_month || parseInt(payment_date.split('-')[1]);
+
   try {
     const { data, error } = await supabaseAdmin
       .from('payments')
       .insert([{
-        school_id, amount, payment_date, payment_type: 'mensualidad', student_id, description, payment_month
+        school_id, 
+        amount, 
+        payment_date, 
+        payment_type: 'mensualidad', 
+        student_id, 
+        description, 
+        payment_month: finalMonth
       }])
       .select().single();
 
@@ -134,11 +143,19 @@ export const registerTeacherPayment = async (req: Request, res: Response) => {
 
   if (!amount || !payment_date || !teacher_id) return res.status(400).json({ error: 'Datos incompletos.' });
 
+  const finalMonth = parseInt(payment_date.split('-')[1]);
+
   try {
     const { data, error } = await supabaseAdmin
       .from('payments')
       .insert([{
-        school_id, amount, payment_date, payment_type: 'pago_profesor', teacher_id, description
+        school_id, 
+        amount, 
+        payment_date, 
+        payment_type: 'pago_profesor', 
+        teacher_id, 
+        description,
+        payment_month: finalMonth
       }])
       .select().single();
 
@@ -148,3 +165,4 @@ export const registerTeacherPayment = async (req: Request, res: Response) => {
     res.status(500).json({ error: 'Excepción interna.' });
   }
 };
+
