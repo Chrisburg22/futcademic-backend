@@ -2,22 +2,30 @@ import { Request, Response } from 'express';
 import { supabaseAdmin } from '../config/supabase';
 
 export const getStudents = async (req: Request, res: Response) => {
-  const { school_id } = req.tenant!;
-  const { category_id } = req.query;
+  const { school_id, user_id, role } = req.tenant!;
+  const { category_id, parent_id } = req.query;
 
   try {
     let query = supabaseAdmin
       .from('students')
       .select(`
-        *, 
+        *,
         parent:users!students_parent_id_fkey(id, full_name),
-        profile:profile_information!id (*)
+        profile:profile_information!id (*),
+        category:categories(id, name)
       `)
       .eq('school_id', school_id)
       .order('full_name', { ascending: true });
 
     if (category_id) {
       query = query.eq('category_id', category_id);
+    }
+
+    if (parent_id) {
+      const resolvedParentId = parent_id === 'me' ? user_id : parent_id as string;
+      query = query.eq('parent_id', resolvedParentId);
+    } else if (role === 'padre') {
+      query = query.eq('parent_id', user_id);
     }
 
     const { data, error } = await query;

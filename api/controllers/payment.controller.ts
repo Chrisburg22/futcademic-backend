@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { supabaseAdmin } from '../config/supabase';
+import { sendPushNotification } from '../config/push';
 
 export const getPayments = async (req: Request, res: Response) => {
   const { school_id } = req.tenant!;
@@ -48,6 +49,36 @@ export const getPaymentsByStudent = async (req: Request, res: Response) => {
   }
 };
 
+export const getPendingPayments = async (req: Request, res: Response) => {
+  const { school_id } = req.tenant!;
+  const month = parseInt(req.query.month as string) || new Date().getMonth() + 1;
+
+  try {
+    const { data: allStudents, error: studentsError } = await supabaseAdmin
+      .from('students')
+      .select('id, full_name, category_id, category:categories(name)')
+      .eq('school_id', school_id);
+
+    if (studentsError) return res.status(500).json({ error: 'Error consultando alumnos.' });
+
+    const { data: paidThisMonth, error: paymentsError } = await supabaseAdmin
+      .from('payments')
+      .select('student_id')
+      .eq('school_id', school_id)
+      .eq('payment_type', 'mensualidad')
+      .eq('payment_month', month);
+
+    if (paymentsError) return res.status(500).json({ error: 'Error consultando pagos.' });
+
+    const paidIds = new Set((paidThisMonth || []).map((p: any) => p.student_id));
+    const pending = (allStudents || []).filter((s: any) => !paidIds.has(s.id));
+
+    res.status(200).json({ month, pending, total_pending: pending.length, total_students: allStudents?.length ?? 0 });
+  } catch (err) {
+    res.status(500).json({ error: 'Error interno.' });
+  }
+};
+
 export const registerStudentPayment = async (req: Request, res: Response) => {
   const { school_id } = req.tenant!;
   const { amount, payment_date, student_id, description, payment_month } = req.body;
@@ -65,6 +96,32 @@ export const registerStudentPayment = async (req: Request, res: Response) => {
       .select().single();
 
     if (error) return res.status(500).json({ error: 'Error BD.' });
+
+    // Notificar al padre del alumno si tiene push token
+    try {
+      const { data: student } = await supabaseAdmin
+        .from('students')
+        .select('full_name, parent_id')
+        .eq('id', student_id)
+        .single();
+
+      if (student?.parent_id) {
+        const { data: parent } = await supabaseAdmin
+          .from('users')
+          .select('push_token')
+          .eq('id', student.parent_id)
+          .single();
+
+        if (parent?.push_token) {
+          await sendPushNotification(
+            parent.push_token,
+            '✅ Pago registrado',
+            `Se registró un pago de $${amount} para ${student.full_name} (${description || 'Mensualidad'}).`
+          );
+        }
+      }
+    } catch { /* no bloquear si falla la notificación */ }
+
     res.status(201).json(data);
   } catch (err) {
     res.status(500).json({ error: 'Error guardando mensualidad.' });

@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { supabaseAdmin } from '../config/supabase';
+import { sendPushNotification } from '../config/push';
 
 export const cancelInstance = async (req: Request, res: Response) => {
   const { school_id } = req.tenant!;
@@ -24,6 +25,42 @@ export const cancelInstance = async (req: Request, res: Response) => {
     const { error } = await query;
 
     if (error) return res.status(400).json({ error: 'Error al cancelar sesión.' });
+
+    // Notificar a padres de alumnos en la categoría afectada
+    try {
+      let categoryId: string | null = null;
+      if (training_id) {
+        const { data: t } = await supabaseAdmin.from('trainings').select('category_id, date').eq('id', training_id).single();
+        categoryId = t?.category_id ?? null;
+      } else if (event_id) {
+        const { data: e } = await supabaseAdmin.from('events').select('category_id').eq('id', event_id).single();
+        categoryId = e?.category_id ?? null;
+      }
+
+      if (categoryId) {
+        const { data: students } = await supabaseAdmin
+          .from('students')
+          .select('parent_id')
+          .eq('category_id', categoryId)
+          .eq('school_id', school_id)
+          .not('parent_id', 'is', null);
+
+        const parentIds = [...new Set((students ?? []).map((s: any) => s.parent_id).filter(Boolean))];
+
+        if (parentIds.length > 0) {
+          const { data: parents } = await supabaseAdmin
+            .from('users')
+            .select('push_token')
+            .in('id', parentIds)
+            .not('push_token', 'is', null);
+
+          await Promise.all((parents ?? []).map((p: any) =>
+            sendPushNotification(p.push_token, '❌ Sesión cancelada', 'Una sesión de entrenamiento ha sido cancelada.')
+          ));
+        }
+      }
+    } catch { /* no bloquear */ }
+
     res.status(200).json({ message: 'Sesión cancelada.' });
   } catch (err) {
     res.status(500).json({ error: 'Error interno.' });

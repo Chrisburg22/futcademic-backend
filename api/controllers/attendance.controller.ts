@@ -43,6 +43,24 @@ export const getAttendancesByStudent = async (req: Request, res: Response) => {
   }
 };
 
+export const markTrainingComplete = async (req: Request, res: Response) => {
+  const { school_id } = req.tenant!;
+  const { id: training_id } = req.params;
+
+  try {
+    const { error } = await supabaseAdmin
+      .from('trainings')
+      .update({ is_completed: true })
+      .eq('id', training_id)
+      .eq('school_id', school_id);
+
+    if (error) return res.status(500).json({ error: 'Error al marcar sesión.' });
+    res.status(200).json({ message: 'Sesión marcada como completada.' });
+  } catch (err) {
+    res.status(500).json({ error: 'Error interno.' });
+  }
+};
+
 export const saveAttendances = async (req: Request, res: Response) => {
   const { school_id, user_id } = req.tenant!;
   const { category_id, date, type, records, training_id } = req.body;

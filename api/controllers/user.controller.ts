@@ -93,6 +93,20 @@ export const changeOwnPassword = async (req: Request, res: Response) => {
   }
 };
 
+export const updatePushToken = async (req: Request, res: Response) => {
+  const { user_id } = req.tenant!;
+  const { push_token } = req.body;
+
+  if (!push_token) return res.status(400).json({ error: 'push_token requerido.' });
+
+  try {
+    await supabaseAdmin.from('users').update({ push_token }).eq('id', user_id);
+    res.status(200).json({ message: 'Token registrado.' });
+  } catch (err) {
+    res.status(500).json({ error: 'Error interno.' });
+  }
+};
+
 export const updateUser = async (req: Request, res: Response) => {
   const { school_id } = req.tenant!;
   const { id } = req.params;

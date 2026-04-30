@@ -7,8 +7,8 @@ const router = Router();
 
 router.use(requireAuth, requireTenant);
 
-router.get('/', requireRole('super_admin', 'admin', 'profesor'), getStudents);
-router.get('/:id', requireRole('super_admin', 'admin', 'profesor'), getStudentDetails);
+router.get('/', requireRole('super_admin', 'admin', 'profesor', 'padre'), getStudents);
+router.get('/:id', requireRole('super_admin', 'admin', 'profesor', 'padre'), getStudentDetails);
 router.post('/', requireRole('super_admin', 'admin', 'profesor'), createStudent);
 router.put('/:id', requireRole('super_admin', 'admin', 'profesor'), updateStudent);
 router.patch('/:id/uniform', requireRole('super_admin', 'admin', 'profesor'), updateUniform);
