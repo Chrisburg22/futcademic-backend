@@ -50,13 +50,25 @@ export const cancelInstance = async (req: Request, res: Response) => {
         if (parentIds.length > 0) {
           const { data: parents } = await supabaseAdmin
             .from('users')
-            .select('push_token')
+            .select('push_token, id')
             .in('id', parentIds)
             .not('push_token', 'is', null);
 
           await Promise.all((parents ?? []).map((p: any) =>
             sendPushNotification(p.push_token, '❌ Sesión cancelada', 'Una sesión de entrenamiento ha sido cancelada.')
           ));
+
+          const notificationRows = (parents ?? []).map((p: any) => ({
+            school_id,
+            user_id: p.id,
+            title: '❌ Sesión cancelada',
+            body: 'Una sesión de entrenamiento ha sido cancelada.',
+            type: 'sesion_cancelada',
+            data: { training_id, event_id, date }
+          }));
+          if (notificationRows.length > 0) {
+            try { await supabaseAdmin.from('notifications').insert(notificationRows); } catch {}
+          }
         }
       }
     } catch { /* no bloquear */ }
@@ -74,7 +86,7 @@ export const getEvents = async (req: Request, res: Response) => {
   try {
     let query = supabaseAdmin
       .from('events')
-      .select('*, category:categories(name)')
+      .select('*, category:categories(name), venue:venues(name, address)')
       .eq('school_id', school_id)
       .order('date', { ascending: true });
 
@@ -97,7 +109,7 @@ export const getTrainingsForDay = async (req: Request, res: Response) => {
   try {
     let query = supabaseAdmin
       .from('trainings')
-      .select('*, category:categories(name), event:events(description)')
+      .select('*, category:categories(name), event:events(description), venue:venues(name, address)')
       .eq('school_id', school_id)
       .eq('date', date as string)
       .eq('is_cancelled', false)
@@ -126,57 +138,59 @@ export const getTrainingsForDay = async (req: Request, res: Response) => {
 
 export const createEvent = async (req: Request, res: Response) => {
   const { school_id } = req.tenant!;
-  const { category_id, date, start_time, type, description, recurringWeeks } = req.body;
+  const { category_id, date, start_time, type, description, recurringWeeks, venue_id, recurrenceRule } = req.body;
 
   if (!category_id || !date || !type) {
     return res.status(400).json({ error: 'Faltan campos obligatorios.' });
   }
 
   try {
-    const count = recurringWeeks ? parseInt(recurringWeeks) : 1;
-    const is_recurring = count > 1;
+    const count = recurringWeeks ? Math.min(parseInt(recurringWeeks), 52) : 1;
+    const is_recurring = count > 1 || !!recurrenceRule;
     let recurring_end_date = null;
+    let storedRecurrenceRule = recurrenceRule || null;
 
-    if (is_recurring) {
+    // Legacy weekly recurrence
+    if (is_recurring && !recurrenceRule && count > 1) {
       const d = new Date(date);
       d.setDate(d.getDate() + (count - 1) * 7);
       recurring_end_date = d.toISOString().split('T')[0];
     }
+
+    // Generate trainings based on recurrence rule
+    const trainingsToInsert = generateTrainings({
+      date,
+      start_time,
+      type,
+      count,
+      recurrenceRule,
+      school_id,
+      category_id,
+      eventId: null, // Will be set after event creation
+      venue_id: venue_id || null
+    });
 
     // 1. Crear el Evento Maestro
     const { data: eventData, error: eventError } = await supabaseAdmin
       .from('events')
       .insert({
         school_id, category_id, date, start_time: start_time || null, type, description: description || null,
-        is_recurring, recurring_weeks: is_recurring ? count : null, recurring_end_date
+        is_recurring, recurring_weeks: is_recurring ? count : null, recurring_end_date,
+        venue_id: venue_id || null,
+        recurrence_rule: storedRecurrenceRule
       })
       .select()
       .single();
 
     if (eventError) return res.status(400).json({ error: eventError.message });
 
-    // 2. Generar Sesiones (Trainings)
-    const trainingsToInsert = [];
-    const firstDate = new Date(date);
+    // Assign event_id to trainings
+    const trainingsWithEventId = trainingsToInsert.map(t => ({ ...t, event_id: eventData.id }));
 
-    for (let i = 0; i < count; i++) {
-        const trainingDate = new Date(firstDate);
-        trainingDate.setDate(firstDate.getDate() + (i * 7));
-        trainingsToInsert.push({
-            school_id,
-            event_id: eventData.id,
-            category_id,
-            date: trainingDate.toISOString().split('T')[0],
-            start_time: start_time || null,
-            type,
-            is_completed: false,
-            is_cancelled: false
-        });
-    }
-
+    // 2. Generar Sesiones (Trainings) — using RPC for atomicity
     const { error: trainingError } = await supabaseAdmin
         .from('trainings')
-        .insert(trainingsToInsert);
+        .insert(trainingsWithEventId);
 
     if (trainingError) return res.status(400).json({ error: 'Error al generar sesiones.' });
 
@@ -185,6 +199,96 @@ export const createEvent = async (req: Request, res: Response) => {
     res.status(500).json({ error: 'Error interno del servidor.' });
   }
 };
+
+interface TrainingGenerationParams {
+  date: string;
+  start_time?: string;
+  type: string;
+  count: number;
+  recurrenceRule?: any;
+  school_id: string;
+  category_id: string;
+  eventId: string | null;
+  venue_id: string | null;
+}
+
+function generateTrainings(params: TrainingGenerationParams) {
+  const { date, start_time, type, count, recurrenceRule, school_id, category_id, venue_id } = params;
+  const trainings: any[] = [];
+  const firstDate = new Date(date + 'T00:00:00');
+
+  // If no recurrence rule, use simple weekly
+  if (!recurrenceRule || !recurrenceRule.pattern) {
+    for (let i = 0; i < count; i++) {
+      const trainingDate = new Date(firstDate);
+      trainingDate.setDate(firstDate.getDate() + (i * 7));
+      trainings.push(createTrainingRow(trainingDate, school_id, category_id, start_time, type, venue_id));
+    }
+    return trainings;
+  }
+
+  const { pattern, daysOfWeek, endDate } = recurrenceRule;
+
+  if (pattern === 'weekly') {
+    // Weekly on selected days of week
+    if (daysOfWeek && daysOfWeek.length > 0) {
+      const end = endDate ? new Date(endDate + 'T00:00:00') : null;
+      const maxWeeks = count || 52; // Default 52 weeks if no end
+      const dayOfWeek = firstDate.getDay();
+      
+      let current = new Date(firstDate);
+      let weeksGenerated = 0;
+
+      while (weeksGenerated < maxWeeks) {
+        for (const dow of daysOfWeek.sort()) {
+          const trainingDate = new Date(current);
+          trainingDate.setDate(current.getDate() + (dow - dayOfWeek));
+          if (trainingDate < firstDate) continue;
+          if (end && trainingDate > end) break;
+          trainings.push(createTrainingRow(trainingDate, school_id, category_id, start_time, type, venue_id));
+        }
+        current.setDate(current.getDate() + 7);
+        weeksGenerated++;
+        if (end && current > end) break;
+      }
+    } else {
+      // Single day weekly
+      for (let i = 0; i < count; i++) {
+        const trainingDate = new Date(firstDate);
+        trainingDate.setDate(firstDate.getDate() + (i * 7));
+        trainings.push(createTrainingRow(trainingDate, school_id, category_id, start_time, type, venue_id));
+      }
+    }
+  } else if (pattern === 'biweekly') {
+    for (let i = 0; i < count; i++) {
+      const trainingDate = new Date(firstDate);
+      trainingDate.setDate(firstDate.getDate() + (i * 14));
+      trainings.push(createTrainingRow(trainingDate, school_id, category_id, start_time, type, venue_id));
+    }
+  } else if (pattern === 'monthly') {
+    for (let i = 0; i < count; i++) {
+      const trainingDate = new Date(firstDate);
+      trainingDate.setMonth(firstDate.getMonth() + i);
+      trainings.push(createTrainingRow(trainingDate, school_id, category_id, start_time, type, venue_id));
+    }
+  }
+
+  return trainings;
+}
+
+function createTrainingRow(date: Date, school_id: string, category_id: string, start_time: string | undefined, type: string, venue_id: string | null) {
+  return {
+    school_id,
+    event_id: null,
+    category_id,
+    date: date.toISOString().split('T')[0],
+    start_time: start_time || null,
+    type,
+    is_completed: false,
+    is_cancelled: false,
+    venue_id
+  };
+}
 
 export const deleteEvent = async (req: Request, res: Response) => {
   const { school_id } = req.tenant!;

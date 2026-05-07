@@ -128,7 +128,8 @@ export const createStudent = async (req: Request, res: Response) => {
         category_id, 
         parent_id: parent_id || null, 
         full_name, 
-        birth_date 
+        birth_date,
+        status: 'activo'
       }])
       .select()
       .single();
@@ -149,6 +150,7 @@ export const updateStudent = async (req: Request, res: Response) => {
     birth_date, 
     category_id,
     parent_id,
+    status,
     phone, 
     address, 
     emergency_contact_name, 
@@ -161,7 +163,7 @@ export const updateStudent = async (req: Request, res: Response) => {
     // 1. Actualizar tabla students
     const { error: studentError } = await supabaseAdmin
       .from('students')
-      .update({ full_name, birth_date, category_id, parent_id })
+      .update({ full_name, birth_date, category_id, parent_id, status })
       .eq('id', id)
       .eq('school_id', school_id);
 
@@ -219,4 +221,167 @@ export const updateUniform = async (req: Request, res: Response) => {
   } catch (err) {
     res.status(500).json({ error: 'Error interno.' });
   }
+};
+
+export const updateStatus = async (req: Request, res: Response) => {
+  const { school_id } = req.tenant!;
+  const { id } = req.params;
+  const { status } = req.body;
+
+  if (!status || !['activo', 'pendiente_pago', 'inactivo', 'becado'].includes(status)) {
+    return res.status(400).json({ error: 'Estado inválido. Debe ser: activo, pendiente_pago, inactivo o becado.' });
+  }
+
+  try {
+    const { error } = await supabaseAdmin
+      .from('students')
+      .update({ status })
+      .eq('id', id)
+      .eq('school_id', school_id);
+
+    if (error) return res.status(400).json({ error: 'Error al actualizar estado.' });
+    res.status(200).json({ message: 'Estado actualizado.' });
+  } catch (err) {
+    res.status(500).json({ error: 'Error interno.' });
+  }
+};
+
+
+
+export const deleteStudent = async (req: Request, res: Response) => {
+  const { school_id, user_id } = req.tenant!;
+  const { id } = req.params;
+
+  try {
+    // 1. Obtener datos del alumno antes de eliminar
+    const { data: student, error: fetchError } = await supabaseAdmin
+      .from('students')
+      .select('*')
+      .eq('id', id)
+      .eq('school_id', school_id)
+      .single();
+
+    if (fetchError || !student) {
+      return res.status(404).json({ error: 'Alumno no encontrado.' });
+    }
+
+    // 2. Registrar en deleted_students para auditoría
+    await supabaseAdmin
+      .from('deleted_students')
+      .insert([{
+        school_id,
+        original_student_id: student.id,
+        full_name: student.full_name,
+        birth_date: student.birth_date,
+        category_id: student.category_id,
+        parent_id: student.parent_id,
+        deleted_by: user_id
+      }]);
+
+    // 3. Eliminar alumno (las asistencias se borran en cascada, payments quedan con student_id=NULL)
+    const { error: deleteError } = await supabaseAdmin
+      .from('students')
+      .delete()
+      .eq('id', id)
+      .eq('school_id', school_id);
+
+    if (deleteError) return res.status(400).json({ error: 'Error al eliminar alumno.' });
+
+    res.status(200).json({ message: 'Alumno eliminado permanentemente.' });
+  } catch (err) {
+    res.status(500).json({ error: 'Error interno.' });
+  }
+};
+
+export const getDeletedStudents = async (req: Request, res: Response) => {
+  const { school_id } = req.tenant!;
+
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('deleted_students')
+      .select('*, category:categories(name), deleted_by_user:users(full_name)')
+      .eq('school_id', school_id)
+      .order('deleted_at', { ascending: false });
+
+    if (error) return res.status(500).json({ error: 'Error al consultar alumnos eliminados.' });
+    res.status(200).json(data);
+  } catch (err) {
+    res.status(500).json({ error: 'Error interno.' });
+  }
+};
+
+export const getStudentStats = async (req: Request, res: Response) => {
+  const { school_id } = req.tenant!;
+  const { id } = req.params;
+  const now = new Date();
+  const firstDay = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+
+  try {
+    const { data: student } = await supabaseAdmin
+      .from('students')
+      .select('current_streak, max_streak')
+      .eq('id', id).eq('school_id', school_id).single();
+
+    if (!student) return res.status(404).json({ error: 'Alumno no encontrado.' });
+
+    const { data: monthlyAttendance } = await supabaseAdmin
+      .from('attendances')
+      .select('present', { count: 'exact' })
+      .eq('student_id', id).eq('school_id', school_id)
+      .gte('date', firstDay);
+
+    const { count: totalAchievements } = await supabaseAdmin
+      .from('achievements')
+      .select('id', { count: 'exact', head: true })
+      .eq('school_id', school_id);
+
+    const { count: unlockedAchievements } = await supabaseAdmin
+      .from('student_achievements')
+      .select('id', { count: 'exact', head: true })
+      .eq('student_id', id);
+
+    res.json({
+      currentStreak: student.current_streak || 0,
+      maxStreak: student.max_streak || 0,
+      trainingsThisMonth: monthlyAttendance?.length || 0,
+      attendedThisMonth: (monthlyAttendance || []).filter((a: any) => a.present).length || 0,
+      achievementsUnlocked: unlockedAchievements || 0,
+      totalAchievements: totalAchievements || 0,
+    });
+  } catch { res.status(500).json({ error: 'Error al obtener estadísticas.' }); }
+};
+
+export const getStudentTeam = async (req: Request, res: Response) => {
+  const { school_id, user_id } = req.tenant!;
+  const { id } = req.params;
+  const studentId = id === 'me' ? user_id : id;
+
+  try {
+    const { data: student } = await supabaseAdmin
+      .from('students')
+      .select('category_id')
+      .eq('id', studentId).eq('school_id', school_id).single();
+
+    if (!student) return res.status(404).json({ error: 'Alumno no encontrado.' });
+
+    const { data: teammates } = await supabaseAdmin
+      .from('students')
+      .select('id, full_name, avatar_url, current_streak')
+      .eq('category_id', student.category_id).eq('school_id', school_id)
+      .eq('status', 'activo')
+      .neq('id', studentId);
+
+    const { data: category } = await supabaseAdmin
+      .from('categories')
+      .select('name, color, birth_year')
+      .eq('id', student.category_id).single();
+
+    res.json({
+      teamName: category?.name || 'Mi Equipo',
+      color: category?.color,
+      birthYear: category?.birth_year,
+      totalTeammates: teammates?.length || 0,
+      teammates: teammates || [],
+    });
+  } catch { res.status(500).json({ error: 'Error al obtener equipo.' }); }
 };

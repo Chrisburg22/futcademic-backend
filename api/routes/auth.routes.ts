@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { registerSchool, inviteUser } from '../controllers/auth.controller';
+import { registerSchool, inviteUser, inviteAdmin } from '../controllers/auth.controller';
 import { requireAuth } from '../middlewares/auth.middleware';
 import { requireTenant, requireRole } from '../middlewares/tenant.middleware';
 
@@ -16,5 +16,7 @@ router.post('/invite-parent', requireAuth, requireTenant, requireRole('super_adm
   req.body.role = 'padre';
   inviteUser(req, res);
 });
+
+router.post('/invite-admin', requireAuth, requireTenant, requireRole('super_admin', 'admin'), inviteAdmin);
 
 export default router;

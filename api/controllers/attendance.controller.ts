@@ -70,31 +70,21 @@ export const saveAttendances = async (req: Request, res: Response) => {
   }
 
   try {
-    const insertPayload = records.map((r: any) => ({
-      school_id, 
-      category_id, 
-      student_id: r.student_id, 
-      teacher_id: user_id, 
-      date, 
-      type, 
+    const supabaseRecords = records.map((r: any) => ({
+      studentId: r.student_id,
       present: r.present,
-      training_id: training_id || null
     }));
 
-    const { error } = await supabaseAdmin
-      .from('attendances')
-      .upsert(insertPayload, { onConflict: 'student_id,date,type' });
+    const { data, error } = await supabaseAdmin.rpc('save_attendance_batch', {
+      p_school_id: school_id,
+      p_training_id: training_id || null,
+      p_date: date,
+      p_type: type,
+      p_teacher_id: user_id,
+      p_records: JSON.stringify(supabaseRecords),
+    });
 
     if (error) return res.status(500).json({ error: 'Sucedió un error al guardar.' });
-
-    // Marcar sesión como completada si existe training_id
-    if (training_id) {
-      await supabaseAdmin
-        .from('trainings')
-        .update({ is_completed: true })
-        .eq('id', training_id)
-        .eq('school_id', school_id);
-    }
 
     res.status(200).json({ message: 'Asistencia sincronizada.' });
   } catch (err) {
