@@ -6,7 +6,7 @@ export const getCategories = async (req: Request, res: Response) => {
   try {
     const { data, error } = await supabaseAdmin
       .from('categories')
-      .select('id, name, birth_year, created_at, category_teachers(teacher_id, users(full_name))')
+      .select('id, name, color, birth_year, created_at, category_teachers(teacher_id, users(full_name))')
       .eq('school_id', school_id)
       .order('birth_year', { ascending: false });
 
@@ -27,7 +27,7 @@ export const getCategories = async (req: Request, res: Response) => {
 
 export const createCategory = async (req: Request, res: Response) => {
   const { school_id } = req.tenant!;
-  const { name, birth_year, teacher_id } = req.body;
+  const { name, birth_year, color, teacher_id } = req.body;
 
   if (!name || !birth_year) return res.status(400).json({ error: 'Faltan campos obligatorios.' });
 
@@ -35,7 +35,7 @@ export const createCategory = async (req: Request, res: Response) => {
     // 1. Crear categoría
     const { data: category, error: catError } = await supabaseAdmin
       .from('categories')
-      .insert([{ school_id, name, birth_year }])
+      .insert([{ school_id, name, birth_year, color }])
       .select()
       .single();
 
@@ -59,13 +59,13 @@ export const createCategory = async (req: Request, res: Response) => {
 export const updateCategory = async (req: Request, res: Response) => {
   const { school_id } = req.tenant!;
   const { id } = req.params;
-  const { name, birth_year, teacher_id } = req.body;
+  const { name, birth_year, color, teacher_id } = req.body;
 
   try {
     // 1. Actualizar categoría
     const { error: updateError } = await supabaseAdmin
       .from('categories')
-      .update({ name, birth_year })
+      .update({ name, birth_year, color })
       .eq('id', id)
       .eq('school_id', school_id);
 

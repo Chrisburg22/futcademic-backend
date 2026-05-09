@@ -52,7 +52,8 @@ export const getStudentDetails = async (req: Request, res: Response) => {
       .from('students')
       .select(`
         *,
-        parent:users!students_parent_id_fkey(id, full_name)
+        parent:users!students_parent_id_fkey(id, full_name, phone),
+        category:categories(id, name, color)
       `)
       .eq('id', id)
       .eq('school_id', school_id)
