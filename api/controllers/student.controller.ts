@@ -11,7 +11,6 @@ export const getStudents = async (req: Request, res: Response) => {
       .select(`
         *,
         parent:users!students_parent_id_fkey(id, full_name),
-        profile:profile_information!id (*),
         category:categories(id, name)
       `)
       .eq('school_id', school_id)
@@ -53,8 +52,7 @@ export const getStudentDetails = async (req: Request, res: Response) => {
       .from('students')
       .select(`
         *,
-        parent:users!students_parent_id_fkey(id, full_name),
-        profile:profile_information!id (*)
+        parent:users!students_parent_id_fkey(id, full_name)
       `)
       .eq('id', id)
       .eq('school_id', school_id)
