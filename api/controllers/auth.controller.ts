@@ -12,7 +12,7 @@ export const registerSchool = async (req: Request, res: Response) => {
     const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
       email,
       password,
-      email_confirm: false, // Ahora se enviará correo de confirmación
+      email_confirm: true, // Confirmar automáticamente para permitir login inmediato
     });
 
     if (authError || !authData.user) return res.status(400).json({ error: authError?.message || 'Error en auth' });
