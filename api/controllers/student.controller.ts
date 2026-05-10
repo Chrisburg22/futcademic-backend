@@ -160,16 +160,29 @@ export const updateStudent = async (req: Request, res: Response) => {
   } = req.body;
 
   try {
-    // 1. Actualizar tabla students
+    // 1. Actualizar tabla students (Fuente principal de verdad para alumnos)
     const { error: studentError } = await supabaseAdmin
       .from('students')
-      .update({ full_name, birth_date, category_id, parent_id, status, uniform_delivered })
+      .update({ 
+        full_name, 
+        birth_date, 
+        category_id, 
+        parent_id, 
+        status, 
+        uniform_delivered,
+        phone,
+        address,
+        emergency_contact_name,
+        emergency_contact_phone,
+        medical_notes,
+        avatar_url
+      })
       .eq('id', id)
       .eq('school_id', school_id);
 
     if (studentError) return res.status(400).json({ error: 'Error al actualizar alumno.' });
 
-    // 2. Actualizar tabla users (falla si no se usa el ID correcto)
+    // 2. Actualizar tabla users (opcional, solo si el ID existe en auth)
     const userUpdates: any = {};
     if (full_name) userUpdates.full_name = full_name;
     if (avatar_url) userUpdates.avatar_url = avatar_url;
@@ -181,8 +194,8 @@ export const updateStudent = async (req: Request, res: Response) => {
         .eq('id', id);
     }
 
-    // 3. Actualizar tabla profile_information
-    const { error: profileError } = await supabaseAdmin
+    // 3. Intentar actualizar profile_information (falla si no hay registro en users, pero no bloqueamos)
+    await supabaseAdmin
       .from('profile_information')
       .upsert({
         id,
@@ -195,11 +208,6 @@ export const updateStudent = async (req: Request, res: Response) => {
         avatar_url,
         updated_at: new Date().toISOString()
       });
-
-    if (profileError) {
-      console.error('profileError:', profileError);
-      return res.status(400).json({ error: profileError.message || 'Error al actualizar perfil.' });
-    }
 
     res.status(200).json({ message: 'Alumno actualizado con éxito.' });
   } catch (err) {
