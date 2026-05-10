@@ -155,14 +155,15 @@ export const updateStudent = async (req: Request, res: Response) => {
     emergency_contact_name, 
     emergency_contact_phone, 
     medical_notes,
-    avatar_url
+    avatar_url,
+    uniform_delivered
   } = req.body;
 
   try {
     // 1. Actualizar tabla students
     const { error: studentError } = await supabaseAdmin
       .from('students')
-      .update({ full_name, birth_date, category_id, parent_id, status })
+      .update({ full_name, birth_date, category_id, parent_id, status, uniform_delivered })
       .eq('id', id)
       .eq('school_id', school_id);
 
