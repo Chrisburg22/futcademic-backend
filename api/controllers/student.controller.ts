@@ -180,7 +180,13 @@ export const updateStudent = async (req: Request, res: Response) => {
       .eq('id', id)
       .eq('school_id', school_id);
 
-    if (studentError) return res.status(400).json({ error: 'Error al actualizar alumno.' });
+    if (studentError) {
+      console.error('studentError:', studentError);
+      return res.status(400).json({ 
+        error: 'Error al actualizar alumno.', 
+        details: studentError.message 
+      });
+    }
 
     // 2. Actualizar tabla users (opcional, solo si el ID existe en auth)
     const userUpdates: any = {};
