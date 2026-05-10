@@ -63,7 +63,7 @@ export const registerSchool = async (req: Request, res: Response) => {
 const DEFAULT_PASSWORD = 'Futcamedic2024!';
 
 export const inviteUser = async (req: Request, res: Response) => {
-  const { email, fullName, role, phone } = req.body;
+  const { email, fullName, role, phone, categoryIds, permissions } = req.body;
   const { school_id } = req.tenant!;
 
   if (!email || !fullName || !role) {
@@ -107,7 +107,20 @@ export const inviteUser = async (req: Request, res: Response) => {
         await supabaseAdmin.from('profile_information').upsert([{ id: existing.id, school_id }]);
         
         if (role === 'profesor') {
-          await supabaseAdmin.from('teacher_permissions').insert([{ school_id, teacher_id: existing.id }]);
+          await supabaseAdmin.from('teacher_permissions').upsert([{ 
+            school_id, 
+            teacher_id: existing.id,
+            ...(permissions || {})
+          }]);
+
+          if (categoryIds && Array.isArray(categoryIds)) {
+            const assignments = categoryIds.map(catId => ({
+              school_id,
+              category_id: catId,
+              teacher_id: existing.id
+            }));
+            await supabaseAdmin.from('category_teachers').insert(assignments);
+          }
         }
         
         return res.status(200).json({ message: `Usuario registrado como ${role}.`, userId: existing.id });
@@ -135,9 +148,22 @@ export const inviteUser = async (req: Request, res: Response) => {
       phone: phone || null
     }]);
 
-    // 4. Si es profesor, crear permisos por defecto
+    // 4. Si es profesor, crear permisos y asignaciones
     if (role === 'profesor') {
-      await supabaseAdmin.from('teacher_permissions').insert([{ school_id, teacher_id: userId }]);
+      await supabaseAdmin.from('teacher_permissions').insert([{ 
+        school_id, 
+        teacher_id: userId,
+        ...(permissions || {})
+      }]);
+
+      if (categoryIds && Array.isArray(categoryIds)) {
+        const assignments = categoryIds.map(catId => ({
+          school_id,
+          category_id: catId,
+          teacher_id: userId
+        }));
+        await supabaseAdmin.from('category_teachers').insert(assignments);
+      }
     }
 
     res.status(200).json({ message: `Usuario creado como ${role}. Contraseña default asignada.`, userId });
