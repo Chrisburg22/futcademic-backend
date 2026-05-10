@@ -192,10 +192,13 @@ export const updateStudent = async (req: Request, res: Response) => {
         emergency_contact_phone,
         medical_notes,
         avatar_url,
-        updated_at: new Date()
+        updated_at: new Date().toISOString()
       });
 
-    if (profileError) return res.status(400).json({ error: 'Error al actualizar perfil.' });
+    if (profileError) {
+      console.error('profileError:', profileError);
+      return res.status(400).json({ error: profileError.message || 'Error al actualizar perfil.' });
+    }
 
     res.status(200).json({ message: 'Alumno actualizado con éxito.' });
   } catch (err) {
