@@ -1,32 +1,52 @@
 import { Request, Response } from 'express';
 import { supabaseAdmin } from '../config/supabase';
 
-export const getAttendanceByDate = async (req: Request, res: Response) => {
+export const getAttendancesByCategory = async (req: Request, res: Response) => {
   const { school_id } = req.tenant!;
+  const { id } = req.params;
   const { date } = req.query;
 
-  if (!date) return res.status(400).json({ error: 'Fecha requerida.' });
-
-  const { data, error } = await supabaseAdmin
+  let query = supabaseAdmin
     .from('attendances')
     .select('*, student:students(full_name)')
     .eq('school_id', school_id)
-    .eq('date', date);
+    .eq('category_id', id);
+
+  if (date) {
+    query = query.eq('date', date);
+  }
+
+  const { data, error } = await query;
 
   if (error) return res.status(500).json({ error: error.message });
   res.status(200).json(data);
 };
 
-export const getStudentAttendanceHistory = async (req: Request, res: Response) => {
+export const getAttendancesByStudent = async (req: Request, res: Response) => {
   const { school_id } = req.tenant!;
-  const { studentId } = req.params;
+  const { id } = req.params;
 
   const { data, error } = await supabaseAdmin
     .from('attendances')
     .select('*')
     .eq('school_id', school_id)
-    .eq('student_id', studentId)
+    .eq('student_id', id)
     .order('date', { ascending: false });
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.status(200).json(data);
+};
+
+export const markTrainingComplete = async (req: Request, res: Response) => {
+  const { school_id } = req.tenant!;
+  const { id } = req.params;
+
+  const { data, error } = await supabaseAdmin
+    .from('trainings')
+    .update({ is_completed: true })
+    .eq('id', id)
+    .eq('school_id', school_id)
+    .select();
 
   if (error) return res.status(500).json({ error: error.message });
   res.status(200).json(data);
@@ -58,7 +78,7 @@ export const saveAttendances = async (req: Request, res: Response) => {
       return {
         school_id,
         student_id: r.student_id,
-        category_id: student.category_id, // Usamos la del estudiante para mayor precisión
+        category_id: student.category_id,
         teacher_id: user_id,
         training_id: training_id || null,
         date,
@@ -71,8 +91,7 @@ export const saveAttendances = async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'No se encontraron estudiantes válidos.' });
     }
 
-    // 3. Limpiar registros previos para evitar duplicados (puesto que falta la restricción UNIQUE en la DB)
-    // Borramos solo los registros de los estudiantes que estamos enviando en esta fecha/tipo
+    // 3. Limpiar registros previos (manual upsert)
     const { error: deleteError } = await supabaseAdmin
       .from('attendances')
       .delete()
@@ -90,7 +109,7 @@ export const saveAttendances = async (req: Request, res: Response) => {
 
     if (insertError) throw insertError;
 
-    // 5. Marcar el entrenamiento como completado si se proporcionó un training_id
+    // 5. Marcar el entrenamiento como completado
     if (training_id) {
       await supabaseAdmin
         .from('trainings')
