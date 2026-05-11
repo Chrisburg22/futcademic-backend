@@ -29,7 +29,9 @@ export const createVenue = async (req: Request, res: Response) => {
     capacity,
     has_lighting,
     is_covered,
-    type_label
+    type_label,
+    latitude,
+    longitude
   } = req.body;
 
   if (!name) return res.status(400).json({ error: 'El nombre es obligatorio.' });
@@ -48,7 +50,9 @@ export const createVenue = async (req: Request, res: Response) => {
         capacity: capacity || null,
         has_lighting: has_lighting ?? false,
         is_covered: is_covered ?? false,
-        type_label: type_label || null
+        type_label: type_label || null,
+        latitude: latitude || null,
+        longitude: longitude || null
       }])
       .select()
       .single();
@@ -73,7 +77,9 @@ export const updateVenue = async (req: Request, res: Response) => {
     capacity,
     has_lighting,
     is_covered,
-    type_label
+    type_label,
+    latitude,
+    longitude
   } = req.body;
 
   try {
@@ -89,7 +95,9 @@ export const updateVenue = async (req: Request, res: Response) => {
         capacity,
         has_lighting,
         is_covered,
-        type_label
+        type_label,
+        latitude,
+        longitude
       })
       .eq('id', id)
       .eq('school_id', school_id);
