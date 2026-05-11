@@ -51,8 +51,8 @@ export const createVenue = async (req: Request, res: Response) => {
         has_lighting: has_lighting ?? false,
         is_covered: is_covered ?? false,
         type_label: type_label || null,
-        latitude: latitude || null,
-        longitude: longitude || null
+        latitud: latitude || null,
+        longitud: longitude || null
       }])
       .select()
       .single();
@@ -96,8 +96,8 @@ export const updateVenue = async (req: Request, res: Response) => {
         has_lighting,
         is_covered,
         type_label,
-        latitude,
-        longitude
+        latitud: latitude,
+        longitud: longitude
       })
       .eq('id', id)
       .eq('school_id', school_id);
