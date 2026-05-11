@@ -9,6 +9,10 @@ export const getUsers = async (req: Request, res: Response) => {
     let query = supabaseAdmin
       .from('users')
       .select(`
+        id, 
+        full_name, 
+        role, 
+        created_at,
         categories:category_teachers(category:categories(id, name)),
         permissions:teacher_permissions(
           can_take_attendance,
