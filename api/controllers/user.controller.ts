@@ -50,16 +50,25 @@ export const getTeacherDetails = async (req: Request, res: Response) => {
     const { data: authUser, error: authError } = await supabaseAdmin.auth.admin.getUserById(id);
     const email = authUser?.user?.email || 'Sin email';
 
-    // 3. Obtener categorías asignadas
-    const { data: categories, error: catError } = await supabaseAdmin
-      .from('category_teachers')
-      .select('category:categories(id, name, birth_year)')
-      .eq('teacher_id', id);
+    // 4. Obtener permisos
+    const { data: permissions } = await supabaseAdmin
+      .from('teacher_permissions')
+      .select('*')
+      .eq('teacher_id', id)
+      .maybeSingle();
+    
+    // Note: If no permissions exist, we'll handle it in the response
 
     res.status(200).json({
       ...user,
       email,
-      categories: categories?.map((c: any) => c.category) || []
+      categories: categories?.map((c: any) => c.category) || [],
+      permissions: permissions || {
+        can_take_attendance: true,
+        can_manage_events: true,
+        can_view_finances: false,
+        can_manage_students: false,
+      }
     });
   } catch (err) {
     res.status(500).json({ error: 'Error interno del servidor.' });
