@@ -81,7 +81,7 @@ export const saveAttendances = async (req: Request, res: Response) => {
       p_date: date,
       p_type: type,
       p_teacher_id: user_id,
-      p_records: JSON.stringify(supabaseRecords),
+      p_records: supabaseRecords,
     });
 
     if (error) return res.status(500).json({ error: 'Sucedió un error al guardar.' });
