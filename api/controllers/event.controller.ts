@@ -100,6 +100,25 @@ export const getEvents = async (req: Request, res: Response) => {
   }
 };
 
+export const getEvent = async (req: Request, res: Response) => {
+  const { school_id } = req.tenant!;
+  const { id } = req.params;
+
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('events')
+      .select('*, category:categories(name), venue:venues(name, address)')
+      .eq('school_id', school_id)
+      .eq('id', id)
+      .single();
+
+    if (error) return res.status(500).json({ error: 'Error al obtener evento.' });
+    res.status(200).json(data);
+  } catch (err) {
+    res.status(500).json({ error: 'Error interno.' });
+  }
+};
+
 export const getTrainingsForDay = async (req: Request, res: Response) => {
   const { school_id } = req.tenant!;
   const { date, category_id } = req.query;
@@ -187,7 +206,7 @@ export const createEvent = async (req: Request, res: Response) => {
     // Assign event_id to trainings
     const trainingsWithEventId = trainingsToInsert.map(t => ({ ...t, event_id: eventData.id }));
 
-    // 2. Generar Sesiones (Trainings) — using RPC for atomicity
+    // 2. Generar Sesiones (Trainings)
     const { error: trainingError } = await supabaseAdmin
         .from('trainings')
         .insert(trainingsWithEventId);
@@ -200,95 +219,33 @@ export const createEvent = async (req: Request, res: Response) => {
   }
 };
 
-interface TrainingGenerationParams {
-  date: string;
-  start_time?: string;
-  type: string;
-  count: number;
-  recurrenceRule?: any;
-  school_id: string;
-  category_id: string;
-  eventId: string | null;
-  venue_id: string | null;
-}
+export const updateEvent = async (req: Request, res: Response) => {
+  const { school_id } = req.tenant!;
+  const { id } = req.params;
+  const { category_id, description, venue_id, start_time, end_time } = req.body;
 
-function generateTrainings(params: TrainingGenerationParams) {
-  const { date, start_time, type, count, recurrenceRule, school_id, category_id, venue_id } = params;
-  const trainings: any[] = [];
-  const firstDate = new Date(date + 'T00:00:00');
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('events')
+      .update({
+        category_id,
+        description,
+        venue_id,
+        start_time,
+        end_time,
+        updated_at: new Date()
+      })
+      .eq('id', id)
+      .eq('school_id', school_id)
+      .select()
+      .single();
 
-  // If no recurrence rule, use simple weekly
-  if (!recurrenceRule || !recurrenceRule.pattern) {
-    for (let i = 0; i < count; i++) {
-      const trainingDate = new Date(firstDate);
-      trainingDate.setDate(firstDate.getDate() + (i * 7));
-      trainings.push(createTrainingRow(trainingDate, school_id, category_id, start_time, type, venue_id));
-    }
-    return trainings;
+    if (error) return res.status(400).json({ error: 'Error al actualizar evento.' });
+    res.status(200).json(data);
+  } catch (err) {
+    res.status(500).json({ error: 'Error interno.' });
   }
-
-  const { pattern, daysOfWeek, endDate } = recurrenceRule;
-
-  if (pattern === 'weekly') {
-    // Weekly on selected days of week
-    if (daysOfWeek && daysOfWeek.length > 0) {
-      const end = endDate ? new Date(endDate + 'T00:00:00') : null;
-      const maxWeeks = count || 52; // Default 52 weeks if no end
-      const dayOfWeek = firstDate.getDay();
-      
-      let current = new Date(firstDate);
-      let weeksGenerated = 0;
-
-      while (weeksGenerated < maxWeeks) {
-        for (const dow of daysOfWeek.sort()) {
-          const trainingDate = new Date(current);
-          trainingDate.setDate(current.getDate() + (dow - dayOfWeek));
-          if (trainingDate < firstDate) continue;
-          if (end && trainingDate > end) break;
-          trainings.push(createTrainingRow(trainingDate, school_id, category_id, start_time, type, venue_id));
-        }
-        current.setDate(current.getDate() + 7);
-        weeksGenerated++;
-        if (end && current > end) break;
-      }
-    } else {
-      // Single day weekly
-      for (let i = 0; i < count; i++) {
-        const trainingDate = new Date(firstDate);
-        trainingDate.setDate(firstDate.getDate() + (i * 7));
-        trainings.push(createTrainingRow(trainingDate, school_id, category_id, start_time, type, venue_id));
-      }
-    }
-  } else if (pattern === 'biweekly') {
-    for (let i = 0; i < count; i++) {
-      const trainingDate = new Date(firstDate);
-      trainingDate.setDate(firstDate.getDate() + (i * 14));
-      trainings.push(createTrainingRow(trainingDate, school_id, category_id, start_time, type, venue_id));
-    }
-  } else if (pattern === 'monthly') {
-    for (let i = 0; i < count; i++) {
-      const trainingDate = new Date(firstDate);
-      trainingDate.setMonth(firstDate.getMonth() + i);
-      trainings.push(createTrainingRow(trainingDate, school_id, category_id, start_time, type, venue_id));
-    }
-  }
-
-  return trainings;
-}
-
-function createTrainingRow(date: Date, school_id: string, category_id: string, start_time: string | undefined, type: string, venue_id: string | null) {
-  return {
-    school_id,
-    event_id: null,
-    category_id,
-    date: date.toISOString().split('T')[0],
-    start_time: start_time || null,
-    type,
-    is_completed: false,
-    is_cancelled: false,
-    venue_id
-  };
-}
+};
 
 export const deleteEvent = async (req: Request, res: Response) => {
   const { school_id } = req.tenant!;
@@ -326,3 +283,89 @@ export const getTrainingsByEvent = async (req: Request, res: Response) => {
     res.status(500).json({ error: 'Error interno.' });
   }
 };
+
+interface TrainingGenerationParams {
+  date: string;
+  start_time?: string;
+  type: string;
+  count: number;
+  recurrenceRule?: any;
+  school_id: string;
+  category_id: string;
+  eventId: string | null;
+  venue_id: string | null;
+}
+
+function generateTrainings(params: TrainingGenerationParams) {
+  const { date, start_time, type, count, recurrenceRule, school_id, category_id, venue_id } = params;
+  const trainings: any[] = [];
+  const firstDate = new Date(date + 'T00:00:00');
+
+  if (!recurrenceRule || !recurrenceRule.pattern) {
+    for (let i = 0; i < count; i++) {
+      const trainingDate = new Date(firstDate);
+      trainingDate.setDate(firstDate.getDate() + (i * 7));
+      trainings.push(createTrainingRow(trainingDate, school_id, category_id, start_time, type, venue_id));
+    }
+    return trainings;
+  }
+
+  const { pattern, daysOfWeek, endDate } = recurrenceRule;
+
+  if (pattern === 'weekly') {
+    if (daysOfWeek && daysOfWeek.length > 0) {
+      const end = endDate ? new Date(endDate + 'T00:00:00') : null;
+      const maxWeeks = count || 52;
+      const dayOfWeek = firstDate.getDay();
+      let current = new Date(firstDate);
+      let weeksGenerated = 0;
+
+      while (weeksGenerated < maxWeeks) {
+        for (const dow of daysOfWeek.sort()) {
+          const trainingDate = new Date(current);
+          trainingDate.setDate(current.getDate() + (dow - dayOfWeek));
+          if (trainingDate < firstDate) continue;
+          if (end && trainingDate > end) break;
+          trainings.push(createTrainingRow(trainingDate, school_id, category_id, start_time, type, venue_id));
+        }
+        current.setDate(current.getDate() + 7);
+        weeksGenerated++;
+        if (end && current > end) break;
+      }
+    } else {
+      for (let i = 0; i < count; i++) {
+        const trainingDate = new Date(firstDate);
+        trainingDate.setDate(firstDate.getDate() + (i * 7));
+        trainings.push(createTrainingRow(trainingDate, school_id, category_id, start_time, type, venue_id));
+      }
+    }
+  } else if (pattern === 'biweekly') {
+    for (let i = 0; i < count; i++) {
+      const trainingDate = new Date(firstDate);
+      trainingDate.setDate(firstDate.getDate() + (i * 14));
+      trainings.push(createTrainingRow(trainingDate, school_id, category_id, start_time, type, venue_id));
+    }
+  } else if (pattern === 'monthly') {
+    for (let i = 0; i < count; i++) {
+      const trainingDate = new Date(firstDate);
+      trainingDate.setMonth(firstDate.getMonth() + i);
+      trainings.push(createTrainingRow(trainingDate, school_id, category_id, start_time, type, venue_id));
+    }
+  }
+
+  return trainings;
+}
+
+function createTrainingRow(date: Date, school_id: string, category_id: string, start_time: string | undefined, type: string, venue_id: string | null) {
+  return {
+    school_id,
+    event_id: null,
+    category_id,
+    date: date.toISOString().split('T')[0],
+    start_time: start_time || null,
+    type,
+    is_completed: false,
+    is_cancelled: false,
+    venue_id
+  };
+}

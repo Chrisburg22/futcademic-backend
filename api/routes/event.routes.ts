@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getEvents, createEvent, deleteEvent, cancelInstance, getTrainingsForDay, getTrainingsByEvent } from '../controllers/event.controller';
+import { getEvents, getEvent, createEvent, updateEvent, deleteEvent, cancelInstance, getTrainingsForDay, getTrainingsByEvent } from '../controllers/event.controller';
 import { requireAuth } from '../middlewares/auth.middleware';
 import { requireTenant, requireRole } from '../middlewares/tenant.middleware';
 
@@ -9,8 +9,10 @@ router.use(requireAuth, requireTenant);
 
 router.get('/', getEvents);
 router.get('/trainings', getTrainingsForDay);
+router.get('/:id', getEvent);
 router.get('/:id/trainings', getTrainingsByEvent);
 router.post('/', requireRole('super_admin', 'admin'), createEvent);
+router.put('/:id', requireRole('super_admin', 'admin'), updateEvent);
 router.post('/cancel', requireRole('super_admin', 'admin'), cancelInstance);
 router.delete('/:id', requireRole('super_admin', 'admin'), deleteEvent);
 
