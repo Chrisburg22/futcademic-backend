@@ -14,7 +14,7 @@ export const getUsers = async (req: Request, res: Response) => {
         role, 
         created_at,
         categories:category_teachers(category:categories(id, name)),
-        permissions:teacher_permissions(*)
+        teacher_permissions(*)
       `)
       .eq('school_id', school_id)
       .order('created_at', { ascending: false });
