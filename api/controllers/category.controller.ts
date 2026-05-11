@@ -15,8 +15,13 @@ export const getCategories = async (req: Request, res: Response) => {
     // Simplificar estructura para el frontend
     const categories = data.map((cat: any) => ({
       ...cat,
+      coaches_count: cat.category_teachers?.length || 0,
       teacher: cat.category_teachers?.[0]?.users?.full_name || null,
-      teacher_id: cat.category_teachers?.[0]?.teacher_id || null
+      teacher_id: cat.category_teachers?.[0]?.teacher_id || null,
+      all_teachers: cat.category_teachers?.map((ct: any) => ({
+        id: ct.teacher_id,
+        full_name: ct.users?.full_name
+      })) || []
     }));
 
     res.status(200).json(categories);
@@ -27,7 +32,7 @@ export const getCategories = async (req: Request, res: Response) => {
 
 export const createCategory = async (req: Request, res: Response) => {
   const { school_id } = req.tenant!;
-  const { name, birth_year, color, teacher_id } = req.body;
+  const { name, birth_year, color, teacher_ids } = req.body; // Cambiado a teacher_ids
 
   if (!name || !birth_year) return res.status(400).json({ error: 'Faltan campos obligatorios.' });
 
@@ -40,14 +45,13 @@ export const createCategory = async (req: Request, res: Response) => {
       .single();
 
     if (catError) {
-      return res.status(400).json({ error: 'Falla guardando categoría, cuidado con duplicados.' });
+      return res.status(400).json({ error: 'Falla guardando categoría.' });
     }
 
-    // 2. Si hay profesor, asignar
-    if (teacher_id) {
-       await supabaseAdmin
-        .from('category_teachers')
-        .insert([{ school_id, category_id: category.id, teacher_id }]);
+    // 2. Si hay profesores, asignar
+    if (teacher_ids && Array.isArray(teacher_ids) && teacher_ids.length > 0) {
+       const assignments = teacher_ids.map(t_id => ({ school_id, category_id: category.id, teacher_id: t_id }));
+       await supabaseAdmin.from('category_teachers').insert(assignments);
     }
 
     res.status(201).json(category);
@@ -59,7 +63,7 @@ export const createCategory = async (req: Request, res: Response) => {
 export const updateCategory = async (req: Request, res: Response) => {
   const { school_id } = req.tenant!;
   const { id } = req.params;
-  const { name, birth_year, color, teacher_id } = req.body;
+  const { name, birth_year, color, teacher_ids } = req.body; // Cambiado a teacher_ids
 
   try {
     // 1. Actualizar categoría
@@ -69,40 +73,21 @@ export const updateCategory = async (req: Request, res: Response) => {
       .eq('id', id)
       .eq('school_id', school_id);
 
-    if (updateError) {
-      console.error('Update Category Error:', updateError);
-      return res.status(400).json({ error: 'Error al actualizar categoría: ' + updateError.message });
-    }
+    if (updateError) return res.status(400).json({ error: 'Error al actualizar categoría.' });
 
-    // 2. Actualizar profesor
-    if (teacher_id !== undefined) {
-      const { error: deleteError } = await supabaseAdmin
-        .from('category_teachers')
-        .delete()
-        .eq('category_id', id);
+    // 2. Actualizar profesores
+    if (teacher_ids !== undefined && Array.isArray(teacher_ids)) {
+      await supabaseAdmin.from('category_teachers').delete().eq('category_id', id);
 
-      if (deleteError) {
-        console.error('Delete Teacher Assignment Error:', deleteError);
-        // Continuamos de todos modos o fallamos? Fallamos para ser consistentes.
-        return res.status(400).json({ error: 'Error al limpiar profesores previos.' });
-      }
-
-      if (teacher_id) {
-        const { error: insertError } = await supabaseAdmin
-          .from('category_teachers')
-          .insert([{ school_id, category_id: id, teacher_id }]);
-        
-        if (insertError) {
-          console.error('Insert Teacher Assignment Error:', insertError);
-          return res.status(400).json({ error: 'Error al asignar el nuevo profesor.' });
-        }
+      if (teacher_ids.length > 0) {
+        const assignments = teacher_ids.map(t_id => ({ school_id, category_id: id, teacher_id: t_id }));
+        await supabaseAdmin.from('category_teachers').insert(assignments);
       }
     }
 
-    res.status(200).json({ message: 'Categoría actualizada con éxito.' });
+    res.status(200).json({ message: 'Categoría actualizada.' });
   } catch (err) {
-    console.error('Internal Server Error in updateCategory:', err);
-    res.status(500).json({ error: 'Error interno del servidor.' });
+    res.status(500).json({ error: 'Error interno.' });
   }
 };
 
