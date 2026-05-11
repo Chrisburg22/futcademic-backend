@@ -9,12 +9,15 @@ export const getUsers = async (req: Request, res: Response) => {
     let query = supabaseAdmin
       .from('users')
       .select(`
-        id, 
-        full_name, 
-        role, 
-        created_at,
         categories:category_teachers(category:categories(id, name)),
-        teacher_permissions(*)
+        permissions:teacher_permissions(
+          can_take_attendance,
+          can_manage_events,
+          can_view_finances,
+          can_manage_students,
+          can_manage_payments,
+          can_manage_categories
+        )
       `)
       .eq('school_id', school_id)
       .order('created_at', { ascending: false });
