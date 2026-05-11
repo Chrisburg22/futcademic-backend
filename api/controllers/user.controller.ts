@@ -111,15 +111,10 @@ export const updateUser = async (req: Request, res: Response) => {
   const { school_id } = req.tenant!;
   const { id } = req.params;
   const { 
-    full_name, 
-    phone, 
-    address, 
-    birth_date, 
-    gender, 
-    emergency_contact_name, 
-    emergency_contact_phone, 
     medical_notes,
-    avatar_url
+    avatar_url,
+    categoryIds,
+    permissions
   } = req.body;
 
   try {
@@ -155,6 +150,36 @@ export const updateUser = async (req: Request, res: Response) => {
     if (profileError) {
       console.error('Error profile update:', profileError);
       return res.status(400).json({ error: 'Error al actualizar información de perfil.' });
+    }
+
+    // 3. Actualizar categorías (si se proporcionan)
+    if (categoryIds && Array.isArray(categoryIds)) {
+      // Borrar asignaciones anteriores
+      await supabaseAdmin.from('category_teachers').delete().eq('teacher_id', id);
+      
+      // Insertar nuevas
+      if (categoryIds.length > 0) {
+        const catInserts = categoryIds.map(catId => ({
+          teacher_id: id,
+          category_id: catId,
+          school_id
+        }));
+        await supabaseAdmin.from('category_teachers').insert(catInserts);
+      }
+    }
+
+    // 4. Actualizar permisos (si se proporcionan)
+    if (permissions) {
+      const { error: permError } = await supabaseAdmin
+        .from('teacher_permissions')
+        .upsert({
+          teacher_id: id,
+          school_id,
+          ...permissions,
+          updated_at: new Date()
+        });
+      
+      if (permError) console.error('Error updating permissions:', permError);
     }
 
     res.status(200).json({ message: 'Usuario actualizado con éxito.' });
