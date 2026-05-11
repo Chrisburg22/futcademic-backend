@@ -53,9 +53,15 @@ export const getTeacherDetails = async (req: Request, res: Response) => {
 
     if (userError || !user) return res.status(404).json({ error: 'Profesor no encontrado.' });
 
-    // 2. Obtener el email desde auth.users (usando admin API porque no está en public.users)
-    const { data: authUser, error: authError } = await supabaseAdmin.auth.admin.getUserById(id);
+    // 2. Obtener el email desde auth.users
+    const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(id);
     const email = authUser?.user?.email || 'Sin email';
+
+    // 3. Obtener categorías asignadas
+    const { data: catData } = await supabaseAdmin
+      .from('category_teachers')
+      .select('category:categories(id, name)')
+      .eq('teacher_id', id);
 
     // 4. Obtener permisos
     const { data: permissions } = await supabaseAdmin
@@ -64,20 +70,99 @@ export const getTeacherDetails = async (req: Request, res: Response) => {
       .eq('teacher_id', id)
       .maybeSingle();
     
-    // Note: If no permissions exist, we'll handle it in the response
-
     res.status(200).json({
       ...user,
       email,
-      categories: categories?.map((c: any) => c.category) || [],
+      categories: catData?.map((c: any) => c.category) || [],
       permissions: permissions || {
-        can_take_attendance: true,
-        can_manage_events: true,
+        can_take_attendance: false,
+        can_manage_events: false,
         can_view_finances: false,
         can_manage_students: false,
+        can_manage_categories: false,
+        can_manage_payments: false
       }
     });
   } catch (err) {
+    console.error('getTeacherDetails Error:', err);
+    res.status(500).json({ error: 'Error interno del servidor.' });
+  }
+};
+
+export const updateUser = async (req: Request, res: Response) => {
+  const { school_id } = req.tenant!;
+  const { id } = req.params;
+  const { 
+    full_name,
+    phone,
+    address,
+    birth_date,
+    gender,
+    emergency_contact_name,
+    emergency_contact_phone,
+    medical_notes,
+    avatar_url,
+    categoryIds,
+    permissions
+  } = req.body;
+
+  try {
+    // 1. Actualizar nombre en tabla users
+    if (full_name) {
+      await supabaseAdmin
+        .from('users')
+        .update({ full_name, avatar_url })
+        .eq('id', id)
+        .eq('school_id', school_id);
+    }
+
+    // 2. Actualizar perfil en profile_information
+    const profileData = {
+      school_id,
+      phone,
+      address,
+      birth_date,
+      gender,
+      emergency_contact_name,
+      emergency_contact_phone,
+      medical_notes,
+      avatar_url,
+      updated_at: new Date()
+    };
+
+    await supabaseAdmin
+      .from('profile_information')
+      .upsert({ id, ...profileData });
+
+    // 3. Actualizar categorías
+    if (categoryIds && Array.isArray(categoryIds)) {
+      await supabaseAdmin.from('category_teachers').delete().eq('teacher_id', id);
+      
+      if (categoryIds.length > 0) {
+        const catInserts = categoryIds.map(catId => ({
+          teacher_id: id,
+          category_id: catId,
+          school_id
+        }));
+        await supabaseAdmin.from('category_teachers').insert(catInserts);
+      }
+    }
+
+    // 4. Actualizar permisos
+    if (permissions) {
+      await supabaseAdmin
+        .from('teacher_permissions')
+        .upsert({
+          teacher_id: id,
+          school_id,
+          ...permissions,
+          updated_at: new Date()
+        });
+    }
+
+    res.status(200).json({ message: 'Usuario actualizado con éxito.' });
+  } catch (err) {
+    console.error('updateUser Error:', err);
     res.status(500).json({ error: 'Error interno del servidor.' });
   }
 };
@@ -120,86 +205,5 @@ export const updatePushToken = async (req: Request, res: Response) => {
     res.status(200).json({ message: 'Token registrado.' });
   } catch (err) {
     res.status(500).json({ error: 'Error interno.' });
-  }
-};
-
-export const updateUser = async (req: Request, res: Response) => {
-  const { school_id } = req.tenant!;
-  const { id } = req.params;
-  const { 
-    medical_notes,
-    avatar_url,
-    categoryIds,
-    permissions
-  } = req.body;
-
-  try {
-    // 1. Actualizar nombre en tabla users
-    if (full_name) {
-      const { error: userError } = await supabaseAdmin
-        .from('users')
-        .update({ full_name, avatar_url })
-        .eq('id', id)
-        .eq('school_id', school_id);
-      
-      if (userError) return res.status(400).json({ error: 'Error al actualizar nombre.' });
-    }
-
-    // 2. Actualizar (o crear si no existe) perfil en profile_information
-    const profileData = {
-      school_id,
-      phone,
-      address,
-      birth_date,
-      gender,
-      emergency_contact_name,
-      emergency_contact_phone,
-      medical_notes,
-      avatar_url,
-      updated_at: new Date()
-    };
-
-    const { error: profileError } = await supabaseAdmin
-      .from('profile_information')
-      .upsert({ id, ...profileData });
-
-    if (profileError) {
-      console.error('Error profile update:', profileError);
-      return res.status(400).json({ error: 'Error al actualizar información de perfil.' });
-    }
-
-    // 3. Actualizar categorías (si se proporcionan)
-    if (categoryIds && Array.isArray(categoryIds)) {
-      // Borrar asignaciones anteriores
-      await supabaseAdmin.from('category_teachers').delete().eq('teacher_id', id);
-      
-      // Insertar nuevas
-      if (categoryIds.length > 0) {
-        const catInserts = categoryIds.map(catId => ({
-          teacher_id: id,
-          category_id: catId,
-          school_id
-        }));
-        await supabaseAdmin.from('category_teachers').insert(catInserts);
-      }
-    }
-
-    // 4. Actualizar permisos (si se proporcionan)
-    if (permissions) {
-      const { error: permError } = await supabaseAdmin
-        .from('teacher_permissions')
-        .upsert({
-          teacher_id: id,
-          school_id,
-          ...permissions,
-          updated_at: new Date()
-        });
-      
-      if (permError) console.error('Error updating permissions:', permError);
-    }
-
-    res.status(200).json({ message: 'Usuario actualizado con éxito.' });
-  } catch (err) {
-    res.status(500).json({ error: 'Error interno del servidor.' });
   }
 };
