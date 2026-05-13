@@ -11,6 +11,8 @@ export const getUsers = async (req: Request, res: Response) => {
       .select(`
         id, 
         full_name, 
+        first_name,
+        last_name,
         role, 
         created_at,
         categories:category_teachers(category:categories(id, name)),
@@ -50,6 +52,8 @@ export const getTeacherDetails = async (req: Request, res: Response) => {
       .select(`
         id, 
         full_name, 
+        first_name,
+        last_name,
         role, 
         created_at,
         profile:profile_information (*)
@@ -100,7 +104,9 @@ export const updateUser = async (req: Request, res: Response) => {
   const { school_id } = req.tenant!;
   const { id } = req.params;
   const { 
-    full_name,
+    fullName: rawFullName,
+    firstName,
+    lastName,
     phone,
     address,
     birth_date,
@@ -113,12 +119,22 @@ export const updateUser = async (req: Request, res: Response) => {
     permissions
   } = req.body;
 
+  const finalFirstName = firstName || (rawFullName ? rawFullName.split(' ')[0] : undefined);
+  const finalLastName = lastName || (rawFullName ? rawFullName.split(' ').slice(1).join(' ') : undefined);
+  const fullName = rawFullName || (firstName && lastName ? `${firstName} ${lastName}` : undefined);
+
   try {
     // 1. Actualizar nombre en tabla users
-    if (full_name) {
+    const userUpdates: any = {};
+    if (fullName) userUpdates.full_name = fullName;
+    if (finalFirstName) userUpdates.first_name = finalFirstName;
+    if (finalLastName) userUpdates.last_name = finalLastName;
+    if (avatar_url) userUpdates.avatar_url = avatar_url;
+
+    if (Object.keys(userUpdates).length > 0) {
       await supabaseAdmin
         .from('users')
-        .update({ full_name, avatar_url })
+        .update(userUpdates)
         .eq('id', id)
         .eq('school_id', school_id);
     }
@@ -171,6 +187,57 @@ export const updateUser = async (req: Request, res: Response) => {
   } catch (err) {
     console.error('updateUser Error:', err);
     res.status(500).json({ error: 'Error interno del servidor.' });
+  }
+};
+
+export const updateOwnProfile = async (req: Request, res: Response) => {
+  const { user_id, school_id } = req.tenant!;
+  const { fullName: rawFullName, firstName, lastName, phone, avatar_url } = req.body;
+
+  const finalFirstName = firstName || (rawFullName ? rawFullName.split(' ')[0] : undefined);
+  const finalLastName = lastName || (rawFullName ? rawFullName.split(' ').slice(1).join(' ') : undefined);
+  const fullName = rawFullName || (firstName && lastName ? `${firstName} ${lastName}` : undefined);
+
+  try {
+    const userUpdates: any = {};
+    if (fullName) userUpdates.full_name = fullName;
+    if (finalFirstName) userUpdates.first_name = finalFirstName;
+    if (finalLastName) userUpdates.last_name = finalLastName;
+    if (avatar_url) userUpdates.avatar_url = avatar_url;
+
+    if (Object.keys(userUpdates).length > 0) {
+      await supabaseAdmin
+        .from('users')
+        .update(userUpdates)
+        .eq('id', user_id)
+        .eq('school_id', school_id);
+    }
+
+    if (phone || avatar_url) {
+      await supabaseAdmin
+        .from('profile_information')
+        .upsert({ id: user_id, school_id, ...(phone ? { phone } : {}), ...(avatar_url ? { avatar_url } : {}), updated_at: new Date() });
+    }
+
+    res.status(200).json({ message: 'Perfil actualizado.' });
+  } catch (err) {
+    res.status(500).json({ error: 'Error interno.' });
+  }
+};
+
+export const completeOnboarding = async (req: Request, res: Response) => {
+  const { user_id, school_id } = req.tenant!;
+
+  try {
+    await supabaseAdmin
+      .from('users')
+      .update({ onboarded_at: new Date().toISOString() })
+      .eq('id', user_id)
+      .eq('school_id', school_id);
+
+    res.status(200).json({ message: 'Onboarding completado.' });
+  } catch (err) {
+    res.status(500).json({ error: 'Error interno.' });
   }
 };
 

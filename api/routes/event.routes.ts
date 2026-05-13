@@ -11,9 +11,9 @@ router.get('/', getEvents);
 router.get('/trainings', getTrainingsForDay);
 router.get('/:id', getEvent);
 router.get('/:id/trainings', getTrainingsByEvent);
-router.post('/', requireRole('super_admin', 'admin'), createEvent);
-router.put('/:id', requireRole('super_admin', 'admin'), updateEvent);
-router.post('/cancel', requireRole('super_admin', 'admin'), cancelInstance);
+router.post('/', requireRole('super_admin', 'admin', 'profesor'), createEvent);
+router.put('/:id', requireRole('super_admin', 'admin', 'profesor'), updateEvent);
+router.post('/cancel', requireRole('super_admin', 'admin', 'profesor'), cancelInstance);
 router.delete('/:id', requireRole('super_admin', 'admin'), deleteEvent);
 
 export default router;

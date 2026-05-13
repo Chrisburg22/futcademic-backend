@@ -1,0 +1,13 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const venue_controller_1 = require("../controllers/venue.controller");
+const auth_middleware_1 = require("../middlewares/auth.middleware");
+const tenant_middleware_1 = require("../middlewares/tenant.middleware");
+const router = (0, express_1.Router)();
+router.use(auth_middleware_1.requireAuth, tenant_middleware_1.requireTenant);
+router.get('/', venue_controller_1.getVenues);
+router.post('/', (0, tenant_middleware_1.requireRole)('super_admin', 'admin'), venue_controller_1.createVenue);
+router.patch('/:id', (0, tenant_middleware_1.requireRole)('super_admin', 'admin'), venue_controller_1.updateVenue);
+router.delete('/:id', (0, tenant_middleware_1.requireRole)('super_admin', 'admin'), venue_controller_1.deleteVenue);
+exports.default = router;

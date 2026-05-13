@@ -34,6 +34,11 @@ export class MockQueryBuilder {
     return Promise.resolve({ data: item, error: null });
   });
 
+  maybeSingle = jest.fn().mockImplementation(() => {
+    const item = Array.isArray(this._data) ? this._data[0] ?? null : this._data;
+    return Promise.resolve({ data: item ?? null, error: null });
+  });
+
   then = jest.fn().mockImplementation(function (
     this: MockQueryBuilder,
     resolve: (value: any) => any,

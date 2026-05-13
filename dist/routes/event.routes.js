@@ -1,0 +1,17 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const event_controller_1 = require("../controllers/event.controller");
+const auth_middleware_1 = require("../middlewares/auth.middleware");
+const tenant_middleware_1 = require("../middlewares/tenant.middleware");
+const router = (0, express_1.Router)();
+router.use(auth_middleware_1.requireAuth, tenant_middleware_1.requireTenant);
+router.get('/', event_controller_1.getEvents);
+router.get('/trainings', event_controller_1.getTrainingsForDay);
+router.get('/:id', event_controller_1.getEvent);
+router.get('/:id/trainings', event_controller_1.getTrainingsByEvent);
+router.post('/', (0, tenant_middleware_1.requireRole)('super_admin', 'admin', 'profesor'), event_controller_1.createEvent);
+router.put('/:id', (0, tenant_middleware_1.requireRole)('super_admin', 'admin', 'profesor'), event_controller_1.updateEvent);
+router.post('/cancel', (0, tenant_middleware_1.requireRole)('super_admin', 'admin', 'profesor'), event_controller_1.cancelInstance);
+router.delete('/:id', (0, tenant_middleware_1.requireRole)('super_admin', 'admin'), event_controller_1.deleteEvent);
+exports.default = router;

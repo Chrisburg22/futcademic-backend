@@ -8,7 +8,7 @@ export const getAttendancesByCategory = async (req: Request, res: Response) => {
 
   let query = supabaseAdmin
     .from('attendances')
-    .select('*, student:students(full_name)')
+    .select('*, student:students(full_name, first_name, last_name)')
     .eq('school_id', school_id)
     .eq('category_id', id);
 
@@ -81,7 +81,37 @@ export const saveAttendances = async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'No se encontraron estudiantes válidos para esta escuela.' });
     }
 
-    // 2. Preparar los registros para insertar
+    // 2. Resolver el training_id real si lo que recibimos fue un event_id
+    let finalTrainingId = (training_id && training_id !== 'temp') ? training_id : null;
+    
+    if (finalTrainingId) {
+      // Verificar si el training_id existe en la tabla trainings
+      const { data: trExists } = await supabaseAdmin
+        .from('trainings')
+        .select('id')
+        .eq('id', finalTrainingId)
+        .single();
+      
+      if (!trExists) {
+        // Si no existe como training, buscarlo como event_id para esta fecha
+        console.log(`[ATTENDANCE] ID ${finalTrainingId} not found in trainings, searching as event_id for date ${date}`);
+        const { data: trFound } = await supabaseAdmin
+          .from('trainings')
+          .select('id')
+          .eq('event_id', finalTrainingId)
+          .eq('date', date)
+          .single();
+        
+        if (trFound) {
+          finalTrainingId = trFound.id;
+          console.log(`[ATTENDANCE] Resolved training_id to: ${finalTrainingId}`);
+        } else {
+          finalTrainingId = null; // No hay sesión vinculada
+        }
+      }
+    }
+
+    // 3. Preparar los registros para insertar
     const attendanceToInsert = records.map((r: any) => {
       const student = students.find(s => s.id === r.student_id);
       if (!student) return null;
@@ -90,7 +120,7 @@ export const saveAttendances = async (req: Request, res: Response) => {
         student_id: r.student_id,
         category_id: student.category_id,
         teacher_id: user_id,
-        training_id: (training_id && training_id !== 'temp') ? training_id : null,
+        training_id: finalTrainingId,
         date,
         type,
         present: r.present
@@ -127,11 +157,11 @@ export const saveAttendances = async (req: Request, res: Response) => {
     }
 
     // 5. Marcar el entrenamiento como completado si aplica
-    if (training_id && training_id !== 'temp') {
+    if (finalTrainingId) {
       const { error: trError } = await supabaseAdmin
         .from('trainings')
         .update({ is_completed: true })
-        .eq('id', training_id)
+        .eq('id', finalTrainingId)
         .eq('school_id', school_id);
       
       if (trError) console.error('[ATTENDANCE] Error updating training status:', trError);

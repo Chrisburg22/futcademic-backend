@@ -128,7 +128,7 @@ export const getTrainingsForDay = async (req: Request, res: Response) => {
   try {
     let query = supabaseAdmin
       .from('trainings')
-      .select('*, category:categories(name), event:events(description), venue:venues(name, address)')
+      .select('*, category:categories(name), event:events(name, description), venue:venues(name, address)')
       .eq('school_id', school_id)
       .eq('date', date as string)
       .eq('is_cancelled', false)
@@ -157,9 +157,9 @@ export const getTrainingsForDay = async (req: Request, res: Response) => {
 
 export const createEvent = async (req: Request, res: Response) => {
   const { school_id } = req.tenant!;
-  const { category_id, date, start_time, type, description, recurringWeeks, venue_id, recurrenceRule } = req.body;
+  const { name, category_id, date, start_time, end_time, type, description, recurringWeeks, venue_id, recurrenceRule } = req.body;
 
-  if (!category_id || !date || !type) {
+  if (!name || !category_id || !date || !type) {
     return res.status(400).json({ error: 'Faltan campos obligatorios.' });
   }
 
@@ -193,7 +193,8 @@ export const createEvent = async (req: Request, res: Response) => {
     const { data: eventData, error: eventError } = await supabaseAdmin
       .from('events')
       .insert({
-        school_id, category_id, date, start_time: start_time || null, type, description: description || null,
+        school_id, category_id, date, start_time: start_time || null, end_time: end_time || null, type, 
+        name: name, description: description || null,
         is_recurring, recurring_weeks: is_recurring ? count : null, recurring_end_date,
         venue_id: venue_id || null,
         recurrence_rule: storedRecurrenceRule
@@ -222,12 +223,13 @@ export const createEvent = async (req: Request, res: Response) => {
 export const updateEvent = async (req: Request, res: Response) => {
   const { school_id } = req.tenant!;
   const { id } = req.params;
-  const { category_id, description, venue_id, start_time, end_time } = req.body;
+  const { name, category_id, description, venue_id, start_time, end_time } = req.body;
 
   try {
     const { data, error } = await supabaseAdmin
       .from('events')
       .update({
+        name,
         category_id,
         description,
         venue_id,

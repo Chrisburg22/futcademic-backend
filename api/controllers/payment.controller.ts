@@ -66,38 +66,58 @@ export const getPaymentsByStudent = async (req: Request, res: Response) => {
 export const getPendingPayments = async (req: Request, res: Response) => {
   const { school_id } = req.tenant!;
   const month = parseInt(req.query.month as string) || new Date().getMonth() + 1;
+  const year = parseInt(req.query.year as string) || new Date().getFullYear();
 
   try {
     const { data: allStudents, error: studentsError } = await supabaseAdmin
       .from('students')
-      .select('id, full_name, category_id, category:categories(name)')
-      .eq('school_id', school_id);
+      .select('id, full_name, category_id, status, category:categories(name, monthly_fee)')
+      .eq('school_id', school_id)
+      .in('status', ['activo', 'pendiente']);
 
     if (studentsError) return res.status(500).json({ error: 'Error consultando alumnos.' });
 
-    // Alumnos con pago directo este mes
-    const { data: paidDirect, error: paymentsError } = await supabaseAdmin
+    // Alumnos con pagos (directos o grupales) este mes/año
+    const { data: paidRecords, error: paymentsError } = await supabaseAdmin
       .from('payments')
-      .select('student_id')
+      .select('id, student_id, amount, payment_month, payment_year, payment_students:payment_students(student_id, amount)')
       .eq('school_id', school_id)
       .eq('payment_type', 'mensualidad')
-      .eq('payment_month', month);
-
-    // Alumnos con pago grupal este mes
-    const { data: paidGroup, error: groupError } = await supabaseAdmin
-      .from('payment_students')
-      .select('student_id')
-      .eq('payment_id', supabaseAdmin.from('payments').select('id').eq('school_id', school_id).eq('payment_type', 'mensualidad').eq('payment_month', month));
+      .eq('payment_month', month)
+      .eq('payment_year', year);
 
     if (paymentsError) return res.status(500).json({ error: 'Error consultando pagos.' });
 
-    const paidIds = new Set([
-      ...(paidDirect || []).map((p: any) => p.student_id),
-      ...(paidGroup || []).map((p: any) => p.student_id)
-    ]);
-    const pending = (allStudents || []).filter((s: any) => !paidIds.has(s.id));
+    // Crear mapa de montos pagados por alumno
+    const paymentMap = new Map();
+    (paidRecords || []).forEach((p: any) => {
+      if (p.student_id) {
+        paymentMap.set(p.student_id, (paymentMap.get(p.student_id) || 0) + Number(p.amount));
+      }
+      (p.payment_students || []).forEach((ps: any) => {
+        paymentMap.set(ps.student_id, (paymentMap.get(ps.student_id) || 0) + Number(ps.amount));
+      });
+    });
 
-    res.status(200).json({ month, pending, total_pending: pending.length, total_students: allStudents?.length ?? 0 });
+    const pending = (allStudents || []).map((s: any) => {
+      const expected = Number(s.category?.monthly_fee || 0);
+      const paid = paymentMap.get(s.id) || 0;
+      return {
+        ...s,
+        monthly_fee: expected,
+        paid_amount: paid,
+        pending_amount: Math.max(0, expected - paid),
+        is_fully_paid: paid >= expected
+      };
+    }).filter((s: any) => !s.is_fully_paid);
+
+    res.status(200).json({ 
+      month, 
+      year,
+      pending, 
+      total_pending_amount: pending.reduce((acc, curr) => acc + curr.pending_amount, 0),
+      total_students: allStudents?.length ?? 0 
+    });
   } catch (err) {
     res.status(500).json({ error: 'Error interno.' });
   }
@@ -112,8 +132,10 @@ export const registerStudentPayment = async (req: Request, res: Response) => {
     return res.status(400).json({ error: 'Faltan datos financieros requeridos.' });
   }
 
-  // Si no se especifica el mes (ej. concepto no es mensualidad), usamos el mes de la fecha de pago
-  const finalMonth = payment_month || parseInt(payment_date.split('-')[1]);
+  // Si no se especifica el mes/año, usamos los de la fecha de pago o actuales
+  const dateParts = payment_date.split('-');
+  const finalMonth = payment_month || parseInt(dateParts[1]);
+  const finalYear = parseInt(dateParts[0]) || new Date().getFullYear();
 
   try {
     if (students.length === 1) {
@@ -127,7 +149,8 @@ export const registerStudentPayment = async (req: Request, res: Response) => {
           payment_type: 'mensualidad', 
           student_id: students[0], 
           description, 
-          payment_month: finalMonth
+          payment_month: finalMonth,
+          payment_year: finalYear
         }])
         .select().single();
 
@@ -150,7 +173,8 @@ export const registerStudentPayment = async (req: Request, res: Response) => {
           payment_type: 'mensualidad',
           student_id: null, // Pago grupal, no ligado a un solo alumno
           description: description || `Pago grupal (${students.length} alumnos)`,
-          payment_month: finalMonth
+          payment_month: finalMonth,
+          payment_year: finalYear
         }])
         .select()
         .single();
@@ -220,7 +244,9 @@ export const registerTeacherPayment = async (req: Request, res: Response) => {
 
   if (!amount || !payment_date || !teacher_id) return res.status(400).json({ error: 'Datos incompletos.' });
 
-  const finalMonth = parseInt(payment_date.split('-')[1]);
+  const dateParts = payment_date.split('-');
+  const finalMonth = parseInt(dateParts[1]);
+  const finalYear = parseInt(dateParts[0]);
 
   try {
     const { data, error } = await supabaseAdmin
@@ -232,7 +258,8 @@ export const registerTeacherPayment = async (req: Request, res: Response) => {
         payment_type: 'pago_profesor', 
         teacher_id, 
         description,
-        payment_month: finalMonth
+        payment_month: finalMonth,
+        payment_year: finalYear
       }])
       .select().single();
 
@@ -250,7 +277,7 @@ export const getAccountStatement = async (req: Request, res: Response) => {
   try {
     const { data: student } = await supabaseAdmin
       .from('students')
-      .select('*, category:categories(name)')
+      .select('*, category:categories(name, monthly_fee)')
       .eq('id', studentId).eq('school_id', school_id).single();
 
     if (!student) return res.status(404).json({ error: 'Alumno no encontrado.' });
@@ -281,13 +308,18 @@ export const getAccountStatement = async (req: Request, res: Response) => {
     const allPayments = [...(payments || []), ...groupPaymentsFlat]
       .sort((a, b) => new Date(b.payment_date).getTime() - new Date(a.payment_date).getTime());
 
-    const hasPaidThisMonth = allPayments.some((p: any) => p.payment_month === currentMonth);
-    const pendingAmount = hasPaidThisMonth ? 0 : 500;
+    const hasPaidThisMonth = allPayments.some((p: any) => p.payment_month === currentMonth && p.payment_year === new Date().getFullYear());
+    const monthlyFee = Number(student.category?.monthly_fee || 0);
+    const paidThisMonth = allPayments
+      .filter((p: any) => p.payment_month === currentMonth && p.payment_year === new Date().getFullYear())
+      .reduce((sum: number, p: any) => sum + Number(p.amount), 0);
+
+    const pendingAmount = Math.max(0, monthlyFee - paidThisMonth);
 
     res.json({
       studentName: student.full_name,
       category: student.category?.name,
-      monthlyFee: 500,
+      monthlyFee,
       pendingAmount,
       hasPaidThisMonth,
       dueDate: `2026-${String(currentMonth).padStart(2, '0')}-10`,

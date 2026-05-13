@@ -1,0 +1,13 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const attendance_controller_1 = require("../controllers/attendance.controller");
+const auth_middleware_1 = require("../middlewares/auth.middleware");
+const tenant_middleware_1 = require("../middlewares/tenant.middleware");
+const router = (0, express_1.Router)();
+router.use(auth_middleware_1.requireAuth, tenant_middleware_1.requireTenant);
+router.get('/category/:id', (0, tenant_middleware_1.requireRole)('super_admin', 'admin', 'profesor'), attendance_controller_1.getAttendancesByCategory);
+router.get('/student/:id', attendance_controller_1.getAttendancesByStudent);
+router.patch('/trainings/:id/complete', (0, tenant_middleware_1.requireRole)('super_admin', 'admin', 'profesor'), attendance_controller_1.markTrainingComplete);
+router.post('/', (0, tenant_middleware_1.requireRole)('super_admin', 'admin', 'profesor'), attendance_controller_1.saveAttendances);
+exports.default = router;

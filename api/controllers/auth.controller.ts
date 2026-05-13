@@ -2,11 +2,15 @@ import { Request, Response } from 'express';
 import { supabaseAdmin } from '../config/supabase';
 
 export const registerSchool = async (req: Request, res: Response) => {
-  const { email, password, fullName, schoolName } = req.body;
+  const { email, password, fullName: rawFullName, firstName, lastName, schoolName } = req.body;
 
-  if (!email || !password || !fullName || !schoolName) {
+  if (!email || !password || (!rawFullName && (!firstName || !lastName)) || !schoolName) {
     return res.status(400).json({ error: 'Faltan datos requeridos.' });
   }
+
+  const finalFirstName = firstName || (rawFullName ? rawFullName.split(' ')[0] : '');
+  const finalLastName = lastName || (rawFullName ? rawFullName.split(' ').slice(1).join(' ') : '');
+  const fullName = rawFullName || `${finalFirstName} ${finalLastName}`;
 
   try {
     const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
@@ -37,6 +41,8 @@ export const registerSchool = async (req: Request, res: Response) => {
           school_id: schoolData.id,
           role: 'admin',
           full_name: fullName,
+          first_name: finalFirstName,
+          last_name: finalLastName,
         },
       ]);
 
@@ -63,19 +69,25 @@ export const registerSchool = async (req: Request, res: Response) => {
 const DEFAULT_PASSWORD = 'Futcamedic2024!';
 
 export const inviteUser = async (req: Request, res: Response) => {
-  const { email, fullName, role, phone, categoryIds, permissions } = req.body;
+  const { email: rawEmail, fullName: rawFullName, firstName, lastName, role, phone, categoryIds, permissions } = req.body;
   const { school_id } = req.tenant!;
 
-  if (!email || !fullName || !role) {
+  if (!rawEmail || (!rawFullName && (!firstName || !lastName)) || !role) {
     return res.status(400).json({ error: 'Email, nombre y rol son obligatorios.' });
   }
+
+  const finalFirstName = firstName || (rawFullName ? rawFullName.split(' ')[0] : '');
+  const finalLastName = lastName || (rawFullName ? rawFullName.split(' ').slice(1).join(' ') : '');
+  const fullName = rawFullName || `${finalFirstName} ${finalLastName}`;
+
+  const email = rawEmail.trim().toLowerCase();
 
   try {
     // 1. Crear usuario con contraseña default — debe cambiarla en primer login
     const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
       email,
       password: DEFAULT_PASSWORD,
-      email_confirm: false, // Ahora se enviará invitación por correo
+      email_confirm: true, // Confirmar automáticamente para permitir login inmediato
       user_metadata: { full_name: fullName },
     });
 
@@ -91,6 +103,7 @@ export const inviteUser = async (req: Request, res: Response) => {
           .from('users').select('id, school_id').eq('id', existing.id).single();
 
         if (existingProfile) {
+          await supabaseAdmin.auth.admin.updateUserById(existing.id, { email_confirm: true });
           return res.status(400).json({
             error: existingProfile.school_id === school_id
               ? 'Este usuario ya está registrado en tu escuela.'
@@ -98,9 +111,19 @@ export const inviteUser = async (req: Request, res: Response) => {
           });
         }
 
+        await supabaseAdmin.auth.admin.updateUserById(existing.id, { email_confirm: true });
+
         const { error: profileError } = await supabaseAdmin
           .from('users')
-          .insert([{ id: existing.id, school_id, role, full_name: fullName, must_change_password: true }]);
+          .insert([{ 
+            id: existing.id, 
+            school_id, 
+            role, 
+            full_name: fullName, 
+            first_name: finalFirstName,
+            last_name: finalLastName,
+            must_change_password: true 
+          }]);
 
         if (profileError) return res.status(500).json({ error: 'Error al crear perfil.' });
 
@@ -134,7 +157,15 @@ export const inviteUser = async (req: Request, res: Response) => {
     // 2. Crear perfil público con must_change_password = true
     const { error: profileError } = await supabaseAdmin
       .from('users')
-      .insert([{ id: userId, school_id, role, full_name: fullName, must_change_password: true }]);
+      .insert([{ 
+        id: userId, 
+        school_id, 
+        role, 
+        full_name: fullName, 
+        first_name: finalFirstName,
+        last_name: finalLastName,
+        must_change_password: true 
+      }]);
 
     if (profileError) {
       console.error('Error insertando perfil público:', profileError);
@@ -174,18 +205,24 @@ export const inviteUser = async (req: Request, res: Response) => {
 };
 
 export const inviteAdmin = async (req: Request, res: Response) => {
-  const { email, fullName } = req.body;
+  const { email: rawEmail, fullName: rawFullName, firstName, lastName } = req.body;
   const { school_id } = req.tenant!;
 
-  if (!email || !fullName) {
+  if (!rawEmail || (!rawFullName && (!firstName || !lastName))) {
     return res.status(400).json({ error: 'Email y nombre son obligatorios.' });
   }
+
+  const finalFirstName = firstName || (rawFullName ? rawFullName.split(' ')[0] : '');
+  const finalLastName = lastName || (rawFullName ? rawFullName.split(' ').slice(1).join(' ') : '');
+  const fullName = rawFullName || `${finalFirstName} ${finalLastName}`;
+
+  const email = rawEmail.trim().toLowerCase();
 
   try {
     const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
       email,
       password: DEFAULT_PASSWORD,
-      email_confirm: false,
+      email_confirm: true,
       user_metadata: { full_name: fullName },
     });
 
@@ -200,6 +237,7 @@ export const inviteAdmin = async (req: Request, res: Response) => {
           .from('users').select('id, school_id').eq('id', existing.id).single();
 
         if (existingProfile) {
+          await supabaseAdmin.auth.admin.updateUserById(existing.id, { email_confirm: true });
           return res.status(400).json({
             error: existingProfile.school_id === school_id
               ? 'Este usuario ya está registrado en tu escuela.'
@@ -207,9 +245,19 @@ export const inviteAdmin = async (req: Request, res: Response) => {
           });
         }
 
+        await supabaseAdmin.auth.admin.updateUserById(existing.id, { email_confirm: true });
+
         const { error: profileError } = await supabaseAdmin
           .from('users')
-          .insert([{ id: existing.id, school_id, role: 'admin', full_name: fullName, must_change_password: true }]);
+          .insert([{ 
+            id: existing.id, 
+            school_id, 
+            role: 'admin', 
+            full_name: fullName, 
+            first_name: finalFirstName,
+            last_name: finalLastName,
+            must_change_password: true 
+          }]);
 
         if (profileError) return res.status(500).json({ error: 'Error al crear perfil.' });
 
@@ -224,7 +272,15 @@ export const inviteAdmin = async (req: Request, res: Response) => {
 
     const { error: profileError } = await supabaseAdmin
       .from('users')
-      .insert([{ id: userId, school_id, role: 'admin', full_name: fullName, must_change_password: true }]);
+      .insert([{ 
+        id: userId, 
+        school_id, 
+        role: 'admin', 
+        full_name: fullName, 
+        first_name: finalFirstName,
+        last_name: finalLastName,
+        must_change_password: true 
+      }]);
 
     if (profileError) return res.status(500).json({ error: 'Error al crear perfil.' });
 
@@ -233,5 +289,40 @@ export const inviteAdmin = async (req: Request, res: Response) => {
     res.status(200).json({ message: 'Admin creado. Contraseña default asignada.', userId });
   } catch (err: any) {
     res.status(500).json({ error: 'Error interno del servidor.' });
+  }
+};
+
+/**
+ * Resuelve username de alumno → email interno para que el cliente haga
+ * supabase.auth.signInWithPassword(email, password) en el siguiente paso.
+ * No expone datos sensibles: solo el email interno (formato local) si el
+ * username existe en alguna escuela.
+ */
+export const resolveStudentUsername = async (req: Request, res: Response) => {
+  const { username } = req.body;
+
+  if (!username || typeof username !== 'string') {
+    return res.status(400).json({ error: 'Username requerido.' });
+  }
+
+  const cleaned = username.trim().toLowerCase();
+
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('users')
+      .select('id, school_id, role')
+      .eq('username', cleaned)
+      .eq('role', 'alumno')
+      .maybeSingle();
+
+    if (error || !data) {
+      return res.status(404).json({ error: 'Usuario no encontrado.' });
+    }
+
+    // Reconstruir el email interno usado al crear el alumno
+    const email = `${cleaned}@${data.school_id}.alumno.futcademic.local`;
+    res.status(200).json({ email });
+  } catch (err) {
+    res.status(500).json({ error: 'Error interno.' });
   }
 };

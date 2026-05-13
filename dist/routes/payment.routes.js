@@ -1,0 +1,15 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const payment_controller_1 = require("../controllers/payment.controller");
+const auth_middleware_1 = require("../middlewares/auth.middleware");
+const tenant_middleware_1 = require("../middlewares/tenant.middleware");
+const router = (0, express_1.Router)();
+router.use(auth_middleware_1.requireAuth, tenant_middleware_1.requireTenant);
+router.get('/', (0, tenant_middleware_1.requireRole)('super_admin', 'admin'), payment_controller_1.getPayments);
+router.get('/pending', (0, tenant_middleware_1.requireRole)('super_admin', 'admin'), payment_controller_1.getPendingPayments);
+router.get('/student/:id', payment_controller_1.getPaymentsByStudent);
+router.post('/students', (0, tenant_middleware_1.requireRole)('super_admin', 'admin'), payment_controller_1.registerStudentPayment);
+router.post('/teachers', (0, tenant_middleware_1.requireRole)('super_admin', 'admin'), payment_controller_1.registerTeacherPayment);
+router.get('/account-statement/:studentId', (0, tenant_middleware_1.requireRole)('super_admin', 'admin', 'padre'), payment_controller_1.getAccountStatement);
+exports.default = router;

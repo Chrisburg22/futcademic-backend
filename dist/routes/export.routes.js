@@ -1,0 +1,11 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const export_controller_1 = require("../controllers/export.controller");
+const auth_middleware_1 = require("../middlewares/auth.middleware");
+const tenant_middleware_1 = require("../middlewares/tenant.middleware");
+const router = (0, express_1.Router)();
+router.use(auth_middleware_1.requireAuth, tenant_middleware_1.requireTenant);
+router.get('/payments', (0, tenant_middleware_1.requireRole)('super_admin', 'admin'), export_controller_1.exportPayments);
+router.get('/attendance', (0, tenant_middleware_1.requireRole)('super_admin', 'admin'), export_controller_1.exportAttendance);
+exports.default = router;

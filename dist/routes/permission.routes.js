@@ -1,0 +1,12 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const permission_controller_1 = require("../controllers/permission.controller");
+const auth_middleware_1 = require("../middlewares/auth.middleware");
+const tenant_middleware_1 = require("../middlewares/tenant.middleware");
+const router = (0, express_1.Router)();
+router.use(auth_middleware_1.requireAuth, tenant_middleware_1.requireTenant);
+router.get('/mine', (0, tenant_middleware_1.requireRole)('profesor'), permission_controller_1.getMyPermissions);
+router.get('/:id', (0, tenant_middleware_1.requireRole)('super_admin', 'admin'), permission_controller_1.getTeacherPermissions);
+router.put('/:id', (0, tenant_middleware_1.requireRole)('super_admin', 'admin'), permission_controller_1.updateTeacherPermissions);
+exports.default = router;

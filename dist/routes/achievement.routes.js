@@ -1,0 +1,11 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const achievement_controller_1 = require("../controllers/achievement.controller");
+const auth_middleware_1 = require("../middlewares/auth.middleware");
+const tenant_middleware_1 = require("../middlewares/tenant.middleware");
+const router = (0, express_1.Router)();
+router.use(auth_middleware_1.requireAuth, tenant_middleware_1.requireTenant);
+router.get('/', (0, tenant_middleware_1.requireRole)('super_admin', 'admin', 'alumno', 'padre'), achievement_controller_1.getAchievements);
+router.post('/check', (0, tenant_middleware_1.requireRole)('super_admin', 'admin', 'profesor'), achievement_controller_1.checkAndUnlockAchievements);
+exports.default = router;
