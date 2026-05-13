@@ -14,6 +14,7 @@ import exportRoutes from './export.routes';
 import notificationRoutes from './notification.routes';
 import achievementRoutes from './achievement.routes';
 import uploadRoutes from './upload.routes';
+import parentRoutes from './parent.routes';
 
 const router = Router();
 
@@ -32,5 +33,6 @@ router.use('/export', exportRoutes);
 router.use('/notifications', notificationRoutes);
 router.use('/achievements', achievementRoutes);
 router.use('/upload', uploadRoutes);
+router.use('/parents', parentRoutes);
 
 export default router;
