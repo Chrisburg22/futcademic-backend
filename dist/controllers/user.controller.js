@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.updatePushToken = exports.changeOwnPassword = exports.completeOnboarding = exports.updateOwnProfile = exports.updateUser = exports.getTeacherDetails = exports.getUsers = void 0;
+exports.updatePushToken = exports.acknowledgePasswordChange = exports.changeOwnPassword = exports.completeOnboarding = exports.updateOwnProfile = exports.updateUser = exports.getTeacherDetails = exports.getUsers = void 0;
 const supabase_1 = require("../config/supabase");
 const getUsers = async (req, res) => {
     const { school_id } = req.tenant;
@@ -11,6 +11,8 @@ const getUsers = async (req, res) => {
             .select(`
         id, 
         full_name, 
+        first_name,
+        last_name,
         role, 
         created_at,
         categories:category_teachers(category:categories(id, name)),
@@ -48,6 +50,8 @@ const getTeacherDetails = async (req, res) => {
             .select(`
         id, 
         full_name, 
+        first_name,
+        last_name,
         role, 
         created_at,
         profile:profile_information (*)
@@ -94,13 +98,25 @@ exports.getTeacherDetails = getTeacherDetails;
 const updateUser = async (req, res) => {
     const { school_id } = req.tenant;
     const { id } = req.params;
-    const { full_name, phone, address, birth_date, gender, emergency_contact_name, emergency_contact_phone, medical_notes, avatar_url, categoryIds, permissions } = req.body;
+    const { fullName: rawFullName, firstName, lastName, phone, address, birth_date, gender, emergency_contact_name, emergency_contact_phone, medical_notes, avatar_url, categoryIds, permissions } = req.body;
+    const finalFirstName = firstName || (rawFullName ? rawFullName.split(' ')[0] : undefined);
+    const finalLastName = lastName || (rawFullName ? rawFullName.split(' ').slice(1).join(' ') : undefined);
+    const fullName = rawFullName || (firstName && lastName ? `${firstName} ${lastName}` : undefined);
     try {
         // 1. Actualizar nombre en tabla users
-        if (full_name) {
+        const userUpdates = {};
+        if (fullName)
+            userUpdates.full_name = fullName;
+        if (finalFirstName)
+            userUpdates.first_name = finalFirstName;
+        if (finalLastName)
+            userUpdates.last_name = finalLastName;
+        if (avatar_url)
+            userUpdates.avatar_url = avatar_url;
+        if (Object.keys(userUpdates).length > 0) {
             await supabase_1.supabaseAdmin
                 .from('users')
-                .update({ full_name, avatar_url })
+                .update(userUpdates)
                 .eq('id', id)
                 .eq('school_id', school_id);
         }
@@ -153,19 +169,42 @@ const updateUser = async (req, res) => {
 exports.updateUser = updateUser;
 const updateOwnProfile = async (req, res) => {
     const { user_id, school_id } = req.tenant;
-    const { full_name, phone, avatar_url } = req.body;
+    const { fullName: rawFullName, firstName, lastName, phone, address, emergency_contact_name, emergency_contact_phone, avatar_url, } = req.body;
+    const finalFirstName = firstName || (rawFullName ? rawFullName.split(' ')[0] : undefined);
+    const finalLastName = lastName || (rawFullName ? rawFullName.split(' ').slice(1).join(' ') : undefined);
+    const fullName = rawFullName || (firstName && lastName ? `${firstName} ${lastName}` : undefined);
     try {
-        if (full_name || avatar_url) {
+        const userUpdates = {};
+        if (fullName)
+            userUpdates.full_name = fullName;
+        if (finalFirstName)
+            userUpdates.first_name = finalFirstName;
+        if (finalLastName)
+            userUpdates.last_name = finalLastName;
+        if (avatar_url)
+            userUpdates.avatar_url = avatar_url;
+        if (Object.keys(userUpdates).length > 0) {
             await supabase_1.supabaseAdmin
                 .from('users')
-                .update({ ...(full_name ? { full_name } : {}), ...(avatar_url ? { avatar_url } : {}) })
+                .update(userUpdates)
                 .eq('id', user_id)
                 .eq('school_id', school_id);
         }
-        if (phone || avatar_url) {
+        const profileUpdates = {};
+        if (phone !== undefined)
+            profileUpdates.phone = phone;
+        if (address !== undefined)
+            profileUpdates.address = address;
+        if (emergency_contact_name !== undefined)
+            profileUpdates.emergency_contact_name = emergency_contact_name;
+        if (emergency_contact_phone !== undefined)
+            profileUpdates.emergency_contact_phone = emergency_contact_phone;
+        if (avatar_url !== undefined)
+            profileUpdates.avatar_url = avatar_url;
+        if (Object.keys(profileUpdates).length > 0) {
             await supabase_1.supabaseAdmin
                 .from('profile_information')
-                .upsert({ id: user_id, school_id, ...(phone ? { phone } : {}), ...(avatar_url ? { avatar_url } : {}), updated_at: new Date() });
+                .upsert({ id: user_id, school_id, ...profileUpdates, updated_at: new Date() });
         }
         res.status(200).json({ message: 'Perfil actualizado.' });
     }
@@ -213,6 +252,26 @@ const changeOwnPassword = async (req, res) => {
     }
 };
 exports.changeOwnPassword = changeOwnPassword;
+/**
+ * El cliente ya cambió su contraseña vía supabase.auth.updateUser (mantiene la
+ * sesión viva, a diferencia de admin.updateUserById que la revoca). Aquí solo
+ * se limpia el flag must_change_password.
+ */
+const acknowledgePasswordChange = async (req, res) => {
+    const { user_id, school_id } = req.tenant;
+    try {
+        await supabase_1.supabaseAdmin
+            .from('users')
+            .update({ must_change_password: false })
+            .eq('id', user_id)
+            .eq('school_id', school_id);
+        res.status(200).json({ message: 'Contraseña actualizada con éxito.' });
+    }
+    catch (err) {
+        res.status(500).json({ error: 'Error interno.' });
+    }
+};
+exports.acknowledgePasswordChange = acknowledgePasswordChange;
 const updatePushToken = async (req, res) => {
     const { user_id } = req.tenant;
     const { push_token } = req.body;

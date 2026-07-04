@@ -9,6 +9,7 @@ router.use(auth_middleware_1.requireAuth, tenant_middleware_1.requireTenant);
 router.get('/mine', (0, tenant_middleware_1.requireRole)('profesor'), category_controller_1.getMyCategoriesAsTeacher);
 router.get('/', category_controller_1.getCategories);
 router.post('/', (0, tenant_middleware_1.requireRole)('super_admin', 'admin'), category_controller_1.createCategory);
+router.post('/full', (0, tenant_middleware_1.requireRole)('super_admin', 'admin'), category_controller_1.createFullCategory);
 router.patch('/:id', (0, tenant_middleware_1.requireRole)('super_admin', 'admin'), category_controller_1.updateCategory);
 router.post('/:id/teachers', (0, tenant_middleware_1.requireRole)('super_admin', 'admin'), category_controller_1.assignTeacher);
 exports.default = router;

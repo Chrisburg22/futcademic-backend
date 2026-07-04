@@ -8,6 +8,7 @@ const router = (0, express_1.Router)();
 router.get('/', auth_middleware_1.requireAuth, tenant_middleware_1.requireTenant, (0, tenant_middleware_1.requireRole)('super_admin', 'admin', 'profesor'), user_controller_1.getUsers);
 router.get('/teachers/:id', auth_middleware_1.requireAuth, tenant_middleware_1.requireTenant, (0, tenant_middleware_1.requireRole)('super_admin', 'admin'), user_controller_1.getTeacherDetails);
 router.patch('/me/password', auth_middleware_1.requireAuth, tenant_middleware_1.requireTenant, user_controller_1.changeOwnPassword);
+router.patch('/me/password-changed', auth_middleware_1.requireAuth, tenant_middleware_1.requireTenant, user_controller_1.acknowledgePasswordChange);
 router.patch('/me/push-token', auth_middleware_1.requireAuth, tenant_middleware_1.requireTenant, user_controller_1.updatePushToken);
 router.patch('/me/profile', auth_middleware_1.requireAuth, tenant_middleware_1.requireTenant, user_controller_1.updateOwnProfile);
 router.post('/me/complete-onboarding', auth_middleware_1.requireAuth, tenant_middleware_1.requireTenant, user_controller_1.completeOnboarding);

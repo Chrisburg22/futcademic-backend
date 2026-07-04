@@ -192,7 +192,16 @@ export const updateUser = async (req: Request, res: Response) => {
 
 export const updateOwnProfile = async (req: Request, res: Response) => {
   const { user_id, school_id } = req.tenant!;
-  const { fullName: rawFullName, firstName, lastName, phone, avatar_url } = req.body;
+  const {
+    fullName: rawFullName,
+    firstName,
+    lastName,
+    phone,
+    address,
+    emergency_contact_name,
+    emergency_contact_phone,
+    avatar_url,
+  } = req.body;
 
   const finalFirstName = firstName || (rawFullName ? rawFullName.split(' ')[0] : undefined);
   const finalLastName = lastName || (rawFullName ? rawFullName.split(' ').slice(1).join(' ') : undefined);
@@ -213,10 +222,17 @@ export const updateOwnProfile = async (req: Request, res: Response) => {
         .eq('school_id', school_id);
     }
 
-    if (phone || avatar_url) {
+    const profileUpdates: any = {};
+    if (phone !== undefined) profileUpdates.phone = phone;
+    if (address !== undefined) profileUpdates.address = address;
+    if (emergency_contact_name !== undefined) profileUpdates.emergency_contact_name = emergency_contact_name;
+    if (emergency_contact_phone !== undefined) profileUpdates.emergency_contact_phone = emergency_contact_phone;
+    if (avatar_url !== undefined) profileUpdates.avatar_url = avatar_url;
+
+    if (Object.keys(profileUpdates).length > 0) {
       await supabaseAdmin
         .from('profile_information')
-        .upsert({ id: user_id, school_id, ...(phone ? { phone } : {}), ...(avatar_url ? { avatar_url } : {}), updated_at: new Date() });
+        .upsert({ id: user_id, school_id, ...profileUpdates, updated_at: new Date() });
     }
 
     res.status(200).json({ message: 'Perfil actualizado.' });
@@ -256,6 +272,27 @@ export const changeOwnPassword = async (req: Request, res: Response) => {
 
     if (authError) return res.status(400).json({ error: 'Error al actualizar contraseña.' });
 
+    await supabaseAdmin
+      .from('users')
+      .update({ must_change_password: false })
+      .eq('id', user_id)
+      .eq('school_id', school_id);
+
+    res.status(200).json({ message: 'Contraseña actualizada con éxito.' });
+  } catch (err) {
+    res.status(500).json({ error: 'Error interno.' });
+  }
+};
+
+/**
+ * El cliente ya cambió su contraseña vía supabase.auth.updateUser (mantiene la
+ * sesión viva, a diferencia de admin.updateUserById que la revoca). Aquí solo
+ * se limpia el flag must_change_password.
+ */
+export const acknowledgePasswordChange = async (req: Request, res: Response) => {
+  const { user_id, school_id } = req.tenant!;
+
+  try {
     await supabaseAdmin
       .from('users')
       .update({ must_change_password: false })

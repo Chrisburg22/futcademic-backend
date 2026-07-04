@@ -8,7 +8,7 @@ const getAttendancesByCategory = async (req, res) => {
     const { date } = req.query;
     let query = supabase_1.supabaseAdmin
         .from('attendances')
-        .select('*, student:students(full_name)')
+        .select('*, student:students(full_name, first_name, last_name)')
         .eq('school_id', school_id)
         .eq('category_id', id);
     if (date) {

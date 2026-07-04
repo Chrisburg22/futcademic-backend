@@ -1,0 +1,12 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const parent_controller_1 = require("../controllers/parent.controller");
+const auth_middleware_1 = require("../middlewares/auth.middleware");
+const tenant_middleware_1 = require("../middlewares/tenant.middleware");
+const router = (0, express_1.Router)();
+router.use(auth_middleware_1.requireAuth, tenant_middleware_1.requireTenant, (0, tenant_middleware_1.requireRole)('padre'));
+router.get('/me/children', parent_controller_1.getMyChildren);
+router.post('/link-child', parent_controller_1.linkChild);
+router.delete('/children/:id', parent_controller_1.unlinkChild);
+exports.default = router;

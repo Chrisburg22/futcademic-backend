@@ -10,7 +10,7 @@ const getStudents = async (req, res) => {
             .from('students')
             .select(`
         *,
-        parent:users!students_parent_id_fkey(id, full_name),
+        parent:users!students_parent_id_fkey(id, full_name, first_name, last_name),
         category:categories(id, name)
       `)
             .eq('school_id', school_id)
@@ -24,6 +24,17 @@ const getStudents = async (req, res) => {
         }
         else if (role === 'padre') {
             query = query.eq('parent_id', user_id);
+        }
+        if (role === 'profesor') {
+            const { data: teacherCats } = await supabase_1.supabaseAdmin
+                .from('category_teachers')
+                .select('category_id')
+                .eq('teacher_id', user_id)
+                .eq('school_id', school_id);
+            const categoryIds = (teacherCats || []).map((r) => r.category_id);
+            if (categoryIds.length === 0)
+                return res.status(200).json([]);
+            query = query.in('category_id', categoryIds);
         }
         const { data, error } = await query;
         if (error) {
@@ -49,7 +60,7 @@ const getStudentDetails = async (req, res) => {
             .from('students')
             .select(`
         *,
-        parent:users!students_parent_id_fkey(id, full_name, phone),
+        parent:users!students_parent_id_fkey(id, full_name, first_name, last_name, phone),
         category:categories(id, name, color)
       `)
             .eq('id', id)
@@ -86,16 +97,15 @@ exports.getStudentDetails = getStudentDetails;
  * Normaliza acentos, descarta caracteres no alfanuméricos, garantiza unicidad
  * por escuela reintentando hasta 5 veces.
  */
-async function generateStudentUsername(fullName, school_id) {
-    const normalized = fullName
+async function generateStudentUsername(firstName, lastName, school_id) {
+    const normalize = (s) => s
         .normalize('NFD')
         .replace(/[̀-ͯ]/g, '')
         .toLowerCase()
-        .replace(/[^a-z0-9\s]/g, '')
+        .replace(/[^a-z0-9]/g, '')
         .trim();
-    const parts = normalized.split(/\s+/).filter(Boolean);
-    const first = parts[0] ?? 'alumno';
-    const last = parts[1] ?? parts[0] ?? '';
+    const first = normalize(firstName) || 'alumno';
+    const last = normalize(lastName) || '';
     const base = last ? `${first}.${last}` : first;
     for (let attempt = 0; attempt < 5; attempt++) {
         const suffix = String(Math.floor(Math.random() * 1000)).padStart(3, '0');
@@ -114,13 +124,16 @@ async function generateStudentUsername(fullName, school_id) {
 }
 const createStudent = async (req, res) => {
     const { school_id } = req.tenant;
-    const { category_id, parent_id, full_name, birth_date } = req.body;
-    if (!category_id || !full_name || !birth_date) {
+    const { category_id, parent_id, full_name: rawFullName, firstName, lastName, birth_date } = req.body;
+    if (!category_id || (!rawFullName && (!firstName || !lastName)) || !birth_date) {
         return res.status(400).json({ error: 'Faltan campos obligatorios (nombre, fecha y categoría).' });
     }
+    const finalFirstName = firstName || (rawFullName ? rawFullName.split(' ')[0] : '');
+    const finalLastName = lastName || (rawFullName ? rawFullName.split(' ').slice(1).join(' ') : '');
+    const fullName = rawFullName || `${finalFirstName} ${finalLastName}`;
     try {
-        // 1. Generar username único y email interno (Supabase Auth requiere email)
-        const username = await generateStudentUsername(full_name, school_id);
+        // 1. Generar username único y email interno
+        const username = await generateStudentUsername(finalFirstName, finalLastName, school_id);
         const internalEmail = `${username}@${school_id}.alumno.futcademic.local`;
         // 2. Crear usuario en Auth con contraseña default — debe cambiarla en primer login
         const { data: authData, error: authError } = await supabase_1.supabaseAdmin.auth.admin.createUser({
@@ -139,7 +152,9 @@ const createStudent = async (req, res) => {
                 id: userId,
                 school_id,
                 role: 'alumno',
-                full_name,
+                full_name: fullName,
+                first_name: finalFirstName,
+                last_name: finalLastName,
                 username,
                 must_change_password: true
             }]);
@@ -159,7 +174,9 @@ const createStudent = async (req, res) => {
                 school_id,
                 category_id,
                 parent_id: parent_id || null,
-                full_name,
+                full_name: fullName,
+                first_name: finalFirstName,
+                last_name: finalLastName,
                 birth_date,
                 status: 'activo'
             }])
@@ -182,13 +199,18 @@ exports.createStudent = createStudent;
 const updateStudent = async (req, res) => {
     const { school_id } = req.tenant;
     const { id } = req.params;
-    const { full_name, birth_date, category_id, parent_id, status, phone, address, emergency_contact_name, emergency_contact_phone, medical_notes, avatar_url, uniform_delivered } = req.body;
+    const { fullName: rawFullName, firstName, lastName, birth_date, category_id, parent_id, status, phone, address, emergency_contact_name, emergency_contact_phone, medical_notes, avatar_url, uniform_delivered } = req.body;
+    const finalFirstName = firstName || (rawFullName ? rawFullName.split(' ')[0] : undefined);
+    const finalLastName = lastName || (rawFullName ? rawFullName.split(' ').slice(1).join(' ') : undefined);
+    const fullName = rawFullName || (firstName && lastName ? `${firstName} ${lastName}` : undefined);
     try {
         // 1. Actualizar tabla students (Fuente principal de verdad para alumnos)
         const { error: studentError } = await supabase_1.supabaseAdmin
             .from('students')
             .update({
-            full_name,
+            full_name: fullName,
+            first_name: finalFirstName,
+            last_name: finalLastName,
             birth_date,
             category_id,
             parent_id,
@@ -212,8 +234,12 @@ const updateStudent = async (req, res) => {
         }
         // 2. Actualizar tabla users (opcional, solo si el ID existe en auth)
         const userUpdates = {};
-        if (full_name)
-            userUpdates.full_name = full_name;
+        if (fullName)
+            userUpdates.full_name = fullName;
+        if (finalFirstName)
+            userUpdates.first_name = finalFirstName;
+        if (finalLastName)
+            userUpdates.last_name = finalLastName;
         if (avatar_url)
             userUpdates.avatar_url = avatar_url;
         if (Object.keys(userUpdates).length > 0) {
@@ -305,6 +331,8 @@ const deleteStudent = async (req, res) => {
                 school_id,
                 original_student_id: student.id,
                 full_name: student.full_name,
+                first_name: student.first_name,
+                last_name: student.last_name,
                 birth_date: student.birth_date,
                 category_id: student.category_id,
                 parent_id: student.parent_id,
@@ -330,7 +358,7 @@ const getDeletedStudents = async (req, res) => {
     try {
         const { data, error } = await supabase_1.supabaseAdmin
             .from('deleted_students')
-            .select('*, category:categories(name), deleted_by_user:users(full_name)')
+            .select('*, category:categories(name), deleted_by_user:users(full_name, first_name, last_name)')
             .eq('school_id', school_id)
             .order('deleted_at', { ascending: false });
         if (error)
@@ -392,25 +420,50 @@ const getStudentTeam = async (req, res) => {
             .eq('id', studentId).eq('school_id', school_id).single();
         if (!student)
             return res.status(404).json({ error: 'Alumno no encontrado.' });
-        const { data: teammates } = await supabase_1.supabaseAdmin
-            .from('students')
-            .select('id, full_name, avatar_url, current_streak')
-            .eq('category_id', student.category_id).eq('school_id', school_id)
-            .eq('status', 'activo')
-            .neq('id', studentId);
-        const { data: category } = await supabase_1.supabaseAdmin
-            .from('categories')
-            .select('name, color, birth_year')
-            .eq('id', student.category_id).single();
+        const [teammates, category, teachers, schedules] = await Promise.all([
+            supabase_1.supabaseAdmin
+                .from('students')
+                .select('id, full_name, avatar_url, current_streak')
+                .eq('category_id', student.category_id).eq('school_id', school_id)
+                .eq('status', 'activo')
+                .neq('id', studentId),
+            supabase_1.supabaseAdmin
+                .from('categories')
+                .select('name, color, birth_year')
+                .eq('id', student.category_id).single(),
+            supabase_1.supabaseAdmin
+                .from('category_teachers')
+                .select('teacher_id, users(full_name, avatar_url, phone)')
+                .eq('category_id', student.category_id),
+            supabase_1.supabaseAdmin
+                .from('events')
+                .select('id, name, start_time, type, venue:venues(name)')
+                .eq('category_id', student.category_id)
+                .eq('type', 'entrenamiento')
+                .eq('is_recurring', true)
+        ]);
         res.json({
-            teamName: category?.name || 'Mi Equipo',
-            color: category?.color,
-            birthYear: category?.birth_year,
-            totalTeammates: teammates?.length || 0,
-            teammates: teammates || [],
+            teamName: category.data?.name || 'Mi Equipo',
+            color: category.data?.color,
+            birthYear: category.data?.birth_year,
+            totalTeammates: teammates.data?.length || 0,
+            teammates: teammates.data || [],
+            teachers: (teachers.data || []).map((t) => ({
+                id: t.teacher_id,
+                name: t.users?.full_name,
+                avatar: t.users?.avatar_url,
+                phone: t.users?.phone,
+            })),
+            schedules: (schedules.data || []).map((s) => ({
+                id: s.id,
+                name: s.name,
+                time: s.start_time?.slice(0, 5),
+                venue: s.venue?.name,
+            })),
         });
     }
-    catch {
+    catch (err) {
+        console.error('Error getStudentTeam:', err);
         res.status(500).json({ error: 'Error al obtener equipo.' });
     }
 };

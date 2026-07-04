@@ -27,6 +27,17 @@ export const getStudents = async (req: Request, res: Response) => {
       query = query.eq('parent_id', user_id);
     }
 
+    if (role === 'profesor') {
+      const { data: teacherCats } = await supabaseAdmin
+        .from('category_teachers')
+        .select('category_id')
+        .eq('teacher_id', user_id)
+        .eq('school_id', school_id);
+      const categoryIds = (teacherCats || []).map((r: any) => r.category_id);
+      if (categoryIds.length === 0) return res.status(200).json([]);
+      query = query.in('category_id', categoryIds);
+    }
+
     const { data, error } = await query;
     if (error) {
       console.error('DB Error getStudents:', error);

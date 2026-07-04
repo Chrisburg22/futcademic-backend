@@ -67,6 +67,7 @@ export const registerSchool = async (req: Request, res: Response) => {
 };
 
 const DEFAULT_PASSWORD = 'Futcamedic2024!';
+const WEB_APP_URL = process.env.WEB_APP_URL || 'http://localhost:5173';
 
 export const inviteUser = async (req: Request, res: Response) => {
   const { email: rawEmail, fullName: rawFullName, firstName, lastName, role, phone, categoryIds, permissions } = req.body;
@@ -83,18 +84,18 @@ export const inviteUser = async (req: Request, res: Response) => {
   const email = rawEmail.trim().toLowerCase();
 
   try {
-    // 1. Crear usuario con contraseña default — debe cambiarla en primer login
-    const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
-      email,
-      password: DEFAULT_PASSWORD,
-      email_confirm: true, // Confirmar automáticamente para permitir login inmediato
-      user_metadata: { full_name: fullName },
+    // 1. Invitar por email: Supabase envía un link que lleva a /accept-invite,
+    // donde el usuario ve su información y establece su contraseña.
+    const { data: authData, error: authError } = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
+      data: { full_name: fullName, invited_role: role },
+      redirectTo: `${WEB_APP_URL}/accept-invite`,
     });
 
     if (authError) {
       // Si ya existe en Auth, recuperar su ID
       if (authError.message.toLowerCase().includes('already registered') ||
-          authError.message.toLowerCase().includes('already exists')) {
+          authError.message.toLowerCase().includes('already exists') ||
+          authError.message.toLowerCase().includes('already been registered')) {
         const { data: { users } } = await supabaseAdmin.auth.admin.listUsers();
         const existing = users.find(u => u.email === email);
         if (!existing) return res.status(400).json({ error: 'Usuario ya registrado pero no recuperable.' });
@@ -115,14 +116,14 @@ export const inviteUser = async (req: Request, res: Response) => {
 
         const { error: profileError } = await supabaseAdmin
           .from('users')
-          .insert([{ 
-            id: existing.id, 
-            school_id, 
-            role, 
-            full_name: fullName, 
+          .insert([{
+            id: existing.id,
+            school_id,
+            role,
+            full_name: fullName,
             first_name: finalFirstName,
             last_name: finalLastName,
-            must_change_password: true 
+            must_change_password: false
           }]);
 
         if (profileError) return res.status(500).json({ error: 'Error al crear perfil.' });
@@ -154,17 +155,18 @@ export const inviteUser = async (req: Request, res: Response) => {
 
     const userId = authData.user!.id;
 
-    // 2. Crear perfil público con must_change_password = true
+    // 2. Crear perfil público — la contraseña la establece el propio usuario
+    // desde el link de invitación, no hace falta forzar cambio
     const { error: profileError } = await supabaseAdmin
       .from('users')
-      .insert([{ 
-        id: userId, 
-        school_id, 
-        role, 
-        full_name: fullName, 
+      .insert([{
+        id: userId,
+        school_id,
+        role,
+        full_name: fullName,
         first_name: finalFirstName,
         last_name: finalLastName,
-        must_change_password: true 
+        must_change_password: false
       }]);
 
     if (profileError) {
@@ -197,7 +199,7 @@ export const inviteUser = async (req: Request, res: Response) => {
       }
     }
 
-    res.status(200).json({ message: `Usuario creado como ${role}. Contraseña default asignada.`, userId });
+    res.status(200).json({ message: `Usuario creado como ${role}. Invitación enviada por correo.`, userId });
   } catch (err: any) {
     console.error('Invite Error Catch:', err);
     res.status(500).json({ error: 'Error interno del servidor.' });
