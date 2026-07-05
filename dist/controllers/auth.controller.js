@@ -61,6 +61,14 @@ const registerSchool = async (req, res) => {
 exports.registerSchool = registerSchool;
 const DEFAULT_PASSWORD = 'Futcamedic2024!';
 const WEB_APP_URL = process.env.WEB_APP_URL || 'http://localhost:5173';
+/**
+ * Construye el link de activación apuntando a NUESTRO sitio (no al dominio de
+ * Supabase). El frontend en /accept-invite verifica el token con
+ * supabase.auth.verifyOtp({ token_hash, type }).
+ */
+function buildActivationLink(tokenHash, type) {
+    return `${WEB_APP_URL}/accept-invite?token_hash=${encodeURIComponent(tokenHash)}&type=${type}`;
+}
 const inviteUser = async (req, res) => {
     const { email: rawEmail, fullName: rawFullName, firstName, lastName, role, phone, categoryIds, permissions } = req.body;
     const { school_id } = req.tenant;
@@ -142,11 +150,11 @@ const inviteUser = async (req, res) => {
                     email,
                     options: { redirectTo: `${WEB_APP_URL}/accept-invite` },
                 });
-                if (mlData?.properties?.action_link) {
+                if (mlData?.properties?.hashed_token) {
                     try {
                         emailSent = await (0, email_service_1.sendInvitationEmail)({
                             to: email, fullName, role, schoolName,
-                            activationLink: mlData.properties.action_link,
+                            activationLink: buildActivationLink(mlData.properties.hashed_token, 'magiclink'),
                         });
                     }
                     catch { /* ya logueado en el servicio */ }
@@ -156,7 +164,9 @@ const inviteUser = async (req, res) => {
             return res.status(400).json({ error: linkError.message });
         }
         const userId = linkData.user.id;
-        const activationLink = linkData.properties.action_link;
+        // Link directo a NUESTRA página; la verificación del token la hace el
+        // frontend con supabase.auth.verifyOtp (no exponemos el dominio de Supabase).
+        const activationLink = buildActivationLink(linkData.properties.hashed_token, 'invite');
         // 2. Crear perfil público — la contraseña la establece el propio usuario
         // desde el link de invitación, no hace falta forzar cambio
         const { error: profileError } = await supabase_1.supabaseAdmin
