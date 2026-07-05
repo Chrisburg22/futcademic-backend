@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { supabaseAdmin } from '../config/supabase';
+import { sendInvitationEmail } from '../services/email.service';
 
 export const registerSchool = async (req: Request, res: Response) => {
   const { email, password, fullName: rawFullName, firstName, lastName, schoolName } = req.body;
@@ -84,18 +85,27 @@ export const inviteUser = async (req: Request, res: Response) => {
   const email = rawEmail.trim().toLowerCase();
 
   try {
-    // 1. Invitar por email: Supabase envía un link que lleva a /accept-invite,
-    // donde el usuario ve su información y establece su contraseña.
-    const { data: authData, error: authError } = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
-      data: { full_name: fullName, invited_role: role },
-      redirectTo: `${WEB_APP_URL}/accept-invite`,
+    // Nombre de la escuela para personalizar el correo de invitación
+    const { data: school } = await supabaseAdmin
+      .from('schools').select('name').eq('id', school_id).single();
+    const schoolName = school?.name || null;
+
+    // 1. Crear el usuario en Auth y generar el link de activación SIN que
+    // Supabase envíe correo — el email lo mandamos con SendGrid (HTML propio).
+    const { data: linkData, error: linkError } = await supabaseAdmin.auth.admin.generateLink({
+      type: 'invite',
+      email,
+      options: {
+        data: { full_name: fullName, invited_role: role },
+        redirectTo: `${WEB_APP_URL}/accept-invite`,
+      },
     });
 
-    if (authError) {
+    if (linkError) {
       // Si ya existe en Auth, recuperar su ID
-      if (authError.message.toLowerCase().includes('already registered') ||
-          authError.message.toLowerCase().includes('already exists') ||
-          authError.message.toLowerCase().includes('already been registered')) {
+      if (linkError.message.toLowerCase().includes('already registered') ||
+          linkError.message.toLowerCase().includes('already exists') ||
+          linkError.message.toLowerCase().includes('already been registered')) {
         const { data: { users } } = await supabaseAdmin.auth.admin.listUsers();
         const existing = users.find(u => u.email === email);
         if (!existing) return res.status(400).json({ error: 'Usuario ya registrado pero no recuperable.' });
@@ -112,8 +122,6 @@ export const inviteUser = async (req: Request, res: Response) => {
           });
         }
 
-        await supabaseAdmin.auth.admin.updateUserById(existing.id, { email_confirm: true });
-
         const { error: profileError } = await supabaseAdmin
           .from('users')
           .insert([{
@@ -129,10 +137,10 @@ export const inviteUser = async (req: Request, res: Response) => {
         if (profileError) return res.status(500).json({ error: 'Error al crear perfil.' });
 
         await supabaseAdmin.from('profile_information').upsert([{ id: existing.id, school_id }]);
-        
+
         if (role === 'profesor') {
-          await supabaseAdmin.from('teacher_permissions').upsert([{ 
-            school_id, 
+          await supabaseAdmin.from('teacher_permissions').upsert([{
+            school_id,
             teacher_id: existing.id,
             ...(permissions || {})
           }]);
@@ -146,14 +154,32 @@ export const inviteUser = async (req: Request, res: Response) => {
             await supabaseAdmin.from('category_teachers').insert(assignments);
           }
         }
-        
-        return res.status(200).json({ message: `Usuario registrado como ${role}.`, userId: existing.id });
+
+        // El usuario ya tenía cuenta en Auth: mandarle un magic link para que
+        // entre y establezca su contraseña en /accept-invite.
+        let emailSent = false;
+        const { data: mlData } = await supabaseAdmin.auth.admin.generateLink({
+          type: 'magiclink',
+          email,
+          options: { redirectTo: `${WEB_APP_URL}/accept-invite` },
+        });
+        if (mlData?.properties?.action_link) {
+          try {
+            emailSent = await sendInvitationEmail({
+              to: email, fullName, role, schoolName,
+              activationLink: mlData.properties.action_link,
+            });
+          } catch { /* ya logueado en el servicio */ }
+        }
+
+        return res.status(200).json({ message: `Usuario registrado como ${role}.`, userId: existing.id, emailSent });
       }
 
-      return res.status(400).json({ error: authError.message });
+      return res.status(400).json({ error: linkError.message });
     }
 
-    const userId = authData.user!.id;
+    const userId = linkData.user!.id;
+    const activationLink = linkData.properties!.action_link;
 
     // 2. Crear perfil público — la contraseña la establece el propio usuario
     // desde el link de invitación, no hace falta forzar cambio
@@ -183,8 +209,8 @@ export const inviteUser = async (req: Request, res: Response) => {
 
     // 4. Si es profesor, crear permisos y asignaciones
     if (role === 'profesor') {
-      await supabaseAdmin.from('teacher_permissions').insert([{ 
-        school_id, 
+      await supabaseAdmin.from('teacher_permissions').insert([{
+        school_id,
         teacher_id: userId,
         ...(permissions || {})
       }]);
@@ -199,7 +225,19 @@ export const inviteUser = async (req: Request, res: Response) => {
       }
     }
 
-    res.status(200).json({ message: `Usuario creado como ${role}. Invitación enviada por correo.`, userId });
+    // 5. Enviar la invitación con SendGrid (no bloquear la creación si falla)
+    let emailSent = false;
+    try {
+      emailSent = await sendInvitationEmail({ to: email, fullName, role, schoolName, activationLink });
+    } catch { /* ya logueado en el servicio */ }
+
+    res.status(200).json({
+      message: emailSent
+        ? `Usuario creado como ${role}. Invitación enviada por correo.`
+        : `Usuario creado como ${role}. No se pudo enviar el correo de invitación (revisa la config de SendGrid).`,
+      userId,
+      emailSent,
+    });
   } catch (err: any) {
     console.error('Invite Error Catch:', err);
     res.status(500).json({ error: 'Error interno del servidor.' });

@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.resolveStudentUsername = exports.inviteAdmin = exports.inviteUser = exports.registerSchool = void 0;
 const supabase_1 = require("../config/supabase");
+const email_service_1 = require("../services/email.service");
 const registerSchool = async (req, res) => {
     const { email, password, fullName: rawFullName, firstName, lastName, schoolName } = req.body;
     if (!email || !password || (!rawFullName && (!firstName || !lastName)) || !schoolName) {
@@ -71,17 +72,25 @@ const inviteUser = async (req, res) => {
     const fullName = rawFullName || `${finalFirstName} ${finalLastName}`;
     const email = rawEmail.trim().toLowerCase();
     try {
-        // 1. Invitar por email: Supabase envía un link que lleva a /accept-invite,
-        // donde el usuario ve su información y establece su contraseña.
-        const { data: authData, error: authError } = await supabase_1.supabaseAdmin.auth.admin.inviteUserByEmail(email, {
-            data: { full_name: fullName, invited_role: role },
-            redirectTo: `${WEB_APP_URL}/accept-invite`,
+        // Nombre de la escuela para personalizar el correo de invitación
+        const { data: school } = await supabase_1.supabaseAdmin
+            .from('schools').select('name').eq('id', school_id).single();
+        const schoolName = school?.name || null;
+        // 1. Crear el usuario en Auth y generar el link de activación SIN que
+        // Supabase envíe correo — el email lo mandamos con SendGrid (HTML propio).
+        const { data: linkData, error: linkError } = await supabase_1.supabaseAdmin.auth.admin.generateLink({
+            type: 'invite',
+            email,
+            options: {
+                data: { full_name: fullName, invited_role: role },
+                redirectTo: `${WEB_APP_URL}/accept-invite`,
+            },
         });
-        if (authError) {
+        if (linkError) {
             // Si ya existe en Auth, recuperar su ID
-            if (authError.message.toLowerCase().includes('already registered') ||
-                authError.message.toLowerCase().includes('already exists') ||
-                authError.message.toLowerCase().includes('already been registered')) {
+            if (linkError.message.toLowerCase().includes('already registered') ||
+                linkError.message.toLowerCase().includes('already exists') ||
+                linkError.message.toLowerCase().includes('already been registered')) {
                 const { data: { users } } = await supabase_1.supabaseAdmin.auth.admin.listUsers();
                 const existing = users.find(u => u.email === email);
                 if (!existing)
@@ -96,7 +105,6 @@ const inviteUser = async (req, res) => {
                             : 'Este usuario ya pertenece a otra escuela.'
                     });
                 }
-                await supabase_1.supabaseAdmin.auth.admin.updateUserById(existing.id, { email_confirm: true });
                 const { error: profileError } = await supabase_1.supabaseAdmin
                     .from('users')
                     .insert([{
@@ -126,11 +134,29 @@ const inviteUser = async (req, res) => {
                         await supabase_1.supabaseAdmin.from('category_teachers').insert(assignments);
                     }
                 }
-                return res.status(200).json({ message: `Usuario registrado como ${role}.`, userId: existing.id });
+                // El usuario ya tenía cuenta en Auth: mandarle un magic link para que
+                // entre y establezca su contraseña en /accept-invite.
+                let emailSent = false;
+                const { data: mlData } = await supabase_1.supabaseAdmin.auth.admin.generateLink({
+                    type: 'magiclink',
+                    email,
+                    options: { redirectTo: `${WEB_APP_URL}/accept-invite` },
+                });
+                if (mlData?.properties?.action_link) {
+                    try {
+                        emailSent = await (0, email_service_1.sendInvitationEmail)({
+                            to: email, fullName, role, schoolName,
+                            activationLink: mlData.properties.action_link,
+                        });
+                    }
+                    catch { /* ya logueado en el servicio */ }
+                }
+                return res.status(200).json({ message: `Usuario registrado como ${role}.`, userId: existing.id, emailSent });
             }
-            return res.status(400).json({ error: authError.message });
+            return res.status(400).json({ error: linkError.message });
         }
-        const userId = authData.user.id;
+        const userId = linkData.user.id;
+        const activationLink = linkData.properties.action_link;
         // 2. Crear perfil público — la contraseña la establece el propio usuario
         // desde el link de invitación, no hace falta forzar cambio
         const { error: profileError } = await supabase_1.supabaseAdmin
@@ -170,7 +196,19 @@ const inviteUser = async (req, res) => {
                 await supabase_1.supabaseAdmin.from('category_teachers').insert(assignments);
             }
         }
-        res.status(200).json({ message: `Usuario creado como ${role}. Invitación enviada por correo.`, userId });
+        // 5. Enviar la invitación con SendGrid (no bloquear la creación si falla)
+        let emailSent = false;
+        try {
+            emailSent = await (0, email_service_1.sendInvitationEmail)({ to: email, fullName, role, schoolName, activationLink });
+        }
+        catch { /* ya logueado en el servicio */ }
+        res.status(200).json({
+            message: emailSent
+                ? `Usuario creado como ${role}. Invitación enviada por correo.`
+                : `Usuario creado como ${role}. No se pudo enviar el correo de invitación (revisa la config de SendGrid).`,
+            userId,
+            emailSent,
+        });
     }
     catch (err) {
         console.error('Invite Error Catch:', err);
