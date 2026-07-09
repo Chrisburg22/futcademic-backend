@@ -1,0 +1,85 @@
+import Anthropic from '@anthropic-ai/sdk';
+import { supabaseAdmin } from '../../config/supabase';
+
+// ---------------------------------------------------------------------------
+// Persistencia del chat en Supabase. Los content blocks de Anthropic se
+// guardan tal cual (jsonb) para poder reconstruir el historial y reanudar
+// el loop tras una confirmación.
+// ---------------------------------------------------------------------------
+
+export interface PendingToolCall {
+  tool_use_id: string;
+  name: string;
+  input: Record<string, any>;
+  label: string;
+}
+
+export interface PendingState {
+  executed_results: Anthropic.ToolResultBlockParam[];
+  pending: PendingToolCall[];
+}
+
+const HISTORY_LIMIT = 30;
+
+export async function saveMessage(
+  conversationId: string,
+  role: 'user' | 'assistant',
+  content: unknown
+): Promise<void> {
+  const { error } = await supabaseAdmin
+    .from('chat_messages')
+    .insert({ conversation_id: conversationId, role, content });
+  if (error) throw new Error(`Error guardando mensaje: ${error.message}`);
+
+  await supabaseAdmin
+    .from('chat_conversations')
+    .update({ updated_at: new Date().toISOString() })
+    .eq('id', conversationId);
+}
+
+/**
+ * Reconstruye el historial como MessageParam[] para la API de Anthropic.
+ * Toma los últimos N mensajes y recorta el inicio hasta un mensaje `user`
+ * de texto plano, para no romper pares tool_use/tool_result.
+ */
+export async function loadHistory(conversationId: string): Promise<Anthropic.MessageParam[]> {
+  const { data, error } = await supabaseAdmin
+    .from('chat_messages')
+    .select('role, content')
+    .eq('conversation_id', conversationId)
+    .order('created_at', { ascending: false })
+    .limit(HISTORY_LIMIT);
+
+  if (error) throw new Error(`Error cargando historial: ${error.message}`);
+
+  const rows = (data || []).reverse();
+
+  // Primer mensaje válido: user sin bloques tool_result
+  const startIdx = rows.findIndex((r) => {
+    if (r.role !== 'user') return false;
+    const blocks = Array.isArray(r.content) ? r.content : [];
+    return !blocks.some((b: any) => b?.type === 'tool_result');
+  });
+  const usable = startIdx >= 0 ? rows.slice(startIdx) : rows;
+
+  return usable.map((r) => ({
+    role: r.role as 'user' | 'assistant',
+    content: r.content as Anthropic.ContentBlockParam[],
+  }));
+}
+
+export async function setPending(conversationId: string, state: PendingState): Promise<void> {
+  const { error } = await supabaseAdmin
+    .from('chat_conversations')
+    .update({ status: 'awaiting_confirmation', pending_state: state, updated_at: new Date().toISOString() })
+    .eq('id', conversationId);
+  if (error) throw new Error(`Error guardando estado pendiente: ${error.message}`);
+}
+
+export async function clearPending(conversationId: string): Promise<void> {
+  const { error } = await supabaseAdmin
+    .from('chat_conversations')
+    .update({ status: 'active', pending_state: null, updated_at: new Date().toISOString() })
+    .eq('id', conversationId);
+  if (error) throw new Error(`Error limpiando estado pendiente: ${error.message}`);
+}

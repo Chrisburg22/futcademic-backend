@@ -1,0 +1,14 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const auth_middleware_1 = require("../middlewares/auth.middleware");
+const tenant_middleware_1 = require("../middlewares/tenant.middleware");
+const chat_controller_1 = require("../controllers/chat.controller");
+const router = (0, express_1.Router)();
+router.use(auth_middleware_1.requireAuth, tenant_middleware_1.requireTenant, (0, tenant_middleware_1.requireRole)('super_admin', 'admin'));
+router.get('/conversations', chat_controller_1.listConversations);
+router.get('/conversations/:id/messages', chat_controller_1.getMessages);
+router.post('/conversations/:id/messages', chat_controller_1.sendMessage);
+router.post('/conversations/:id/confirm', chat_controller_1.resolveConfirmation);
+router.delete('/conversations/:id', chat_controller_1.deleteConversation);
+exports.default = router;
